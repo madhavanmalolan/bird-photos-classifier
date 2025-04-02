@@ -2,6 +2,8 @@
 
 This script uses Google's Gemini AI to identify birds in photos and organize them into folders based on bird species.
 
+![Screenshot](screenshot.png)
+
 Useful for Bird photographers
 ## Dev 
 ```
