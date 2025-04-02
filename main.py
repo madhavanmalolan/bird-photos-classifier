@@ -1,5 +1,6 @@
 import os
 import shutil
+import argparse
 from pathlib import Path
 import google.genai as genai
 from PIL import Image
@@ -21,19 +22,9 @@ def get_bird_info(bird_name):
         prompt = f"""For the bird species '{bird_name}', provide the following information in this exact format:
         Scientific name: [Scientific name]
         Description: [100 words about the bird's appearance, habitat, behavior, and characteristics]
-        Fact 1: [280 character-length interesting fact about the bird]
-        Fact 2: [280 character-length interesting fact about the bird]
-        Fact 3: [280 character-length interesting fact about the bird]
-        Fact 4: [280 character-length interesting fact about the bird]
-        Fact 5: [280 character-length interesting fact about the bird]
-        Fact 6: [280 character-length interesting fact about the bird]
-        Fact 7: [280 character-length interesting fact about the bird]
-        Fact 8: [280 character-length interesting fact about the bird]
-        Fact 9: [280 character-length interesting fact about the bird]
-        Fact 10: [280 character-length interesting fact about the bird]
-        
-        Be specific and accurate. The description should be exactly 100 words.
-        The fact should be engaging and informative, under 280 characters.
+        Wikipedia link: [Wikipedia link]
+
+        Be specific and accurate. The description should be less than 100 words.
         """
         
         response = client.models.generate_content(
@@ -99,53 +90,58 @@ def identify_bird(image_path):
         print(f"Error processing {image_path}: {str(e)}")
         return False, None
 
-def process_photos():
-    # Create input and output directories if they don't exist
-    input_dir = Path('input')
-    output_dir = Path('output')
+def process_photos(input_folder):
+    """Process photos from the input folder."""
+    # Convert input folder to Path object
+    input_dir = Path(input_folder)
+    if not input_dir.exists():
+        raise ValueError(f"Input folder '{input_folder}' does not exist")
+    
+    # Create output directory inside input folder
+    output_dir = input_dir / '0000-bird-folders'
     unidentified_dir = output_dir / "Unidentified"
     output_dir.mkdir(exist_ok=True)
     unidentified_dir.mkdir(exist_ok=True)
     
-    # Process each folder in input directory
-    for folder in input_dir.iterdir():
-        if not folder.is_dir():
+    # Process each image in the input directory
+    for image_path in input_dir.glob('*'):
+        if not image_path.suffix.lower() in ['.jpg', '.jpeg', '.png']:
             continue
             
-        print(f"Processing folder: {folder.name}")
+        print(f"Processing image: {image_path.name}")
+        contains_bird, bird_name = identify_bird(image_path)
         
-        # Process each image in the folder
-        for image_path in folder.glob('*'):
-            if not image_path.suffix.lower() in ['.jpg', '.jpeg', '.png']:
-                continue
-                
-            print(f"Processing image: {image_path.name}")
-            contains_bird, bird_name = identify_bird(image_path)
+        if contains_bird and bird_name:
+            # Create bird folder if it doesn't exist
+            bird_folder = output_dir / bird_name
+            bird_folder.mkdir(exist_ok=True)
             
-            if contains_bird and bird_name:
-                # Create bird folder if it doesn't exist
-                bird_folder = output_dir / bird_name
-                bird_folder.mkdir(exist_ok=True)
-                
-                # Create info file if it doesn't exist
-                info_file = bird_folder / "info.txt"
-                if not info_file.exists():
-                    print(f"Getting information for {bird_name}...")
-                    info_text = get_bird_info(bird_name)
-                    if info_text:
-                        create_bird_info_file(bird_folder, bird_name, info_text)
-                        print(f"Created info file for {bird_name}")
-                
-                # Generate new filename with bird name as suffix
-                new_filename = get_new_filename(image_path, bird_name)
-                
-                # Copy the image to the bird folder with new name
-                shutil.copy2(image_path, bird_folder / new_filename)
-                print(f"Copied {image_path.name} to {bird_name} folder as {new_filename}")
-            else:
-                # Move unidentified photos to the Unidentified folder
-                shutil.copy2(image_path, unidentified_dir / image_path.name)
-                print(f"Moved {image_path.name} to Unidentified folder")
+            # Create info file if it doesn't exist
+            info_file = bird_folder / "info.txt"
+            if not info_file.exists():
+                print(f"Getting information for {bird_name}...")
+                info_text = get_bird_info(bird_name)
+                if info_text:
+                    create_bird_info_file(bird_folder, bird_name, info_text)
+                    print(f"Created info file for {bird_name}")
+            
+            # Generate new filename with bird name as suffix
+            new_filename = get_new_filename(image_path, bird_name)
+            
+            # Copy the image to the bird folder with new name
+            shutil.copy2(image_path, bird_folder / new_filename)
+            print(f"Copied {image_path.name} to {bird_name} folder as {new_filename}")
+        else:
+            # Move unidentified photos to the Unidentified folder
+            shutil.copy2(image_path, unidentified_dir / image_path.name)
+            print(f"Moved {image_path.name} to Unidentified folder")
+
+def main():
+    parser = argparse.ArgumentParser(description='Process bird photos and organize them by species.')
+    parser.add_argument('input_folder', help='Path to the folder containing bird photos')
+    args = parser.parse_args()
+    
+    process_photos(args.input_folder)
 
 if __name__ == "__main__":
-    process_photos()
+    main()
