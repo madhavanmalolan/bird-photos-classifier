@@ -28,8 +28,12 @@ def save_api_key(api_key):
     with open('api_key.json', 'w') as f:
         json.dump({'api_key': api_key}, f)
 
+# Initialize client with API key
+def init_client(api_key):
+    return genai.Client(api_key=api_key)
+
 # Get API key from environment variable or saved file
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY') or load_saved_api_key()
+GOOGLE_API_KEY = load_saved_api_key()
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
@@ -122,7 +126,7 @@ class BirdClassifierGUI:
         api_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
         
         ttk.Label(api_frame, text="Google API Key:").pack(side=tk.LEFT, padx=5)
-        self.api_key_var = tk.StringVar(value=GOOGLE_API_KEY)
+        self.api_key_var = tk.StringVar(value=load_saved_api_key())
         self.api_key_entry = ttk.Entry(api_frame, textvariable=self.api_key_var, width=50, show="*")
         self.api_key_entry.pack(side=tk.LEFT, padx=5)
         
@@ -168,6 +172,9 @@ class BirdClassifierGUI:
         # Queue for thread communication
         self.queue = Queue()
         
+        # Initialize client as None
+        self.client = None
+    
     def browse_folder(self):
         folder = filedialog.askdirectory()
         if folder:
@@ -201,8 +208,11 @@ class BirdClassifierGUI:
         save_api_key(api_key)
         
         # Initialize Gemini client with the API key
-        global client
-        client = genai.Client(api_key=api_key)
+        try:
+            self.client = init_client(api_key)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to initialize API client: {str(e)}")
+            return
         
         folder = self.folder_path.get()
         if not folder:
