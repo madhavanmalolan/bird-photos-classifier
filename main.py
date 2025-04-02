@@ -139,7 +139,7 @@ def get_new_filename(original_path, bird_name, is_blurred=False):
     new_name += ext
     return new_name
 
-def identify_bird(image_path, api_key, loaded_birds):
+def identify_bird(image_path, api_key, loaded_birds, location):
     """Use Gemini API to identify if the image contains a bird and get its name."""
     try:
         prompt = f"""Analyze this image and tell me:
@@ -152,7 +152,8 @@ def identify_bird(image_path, api_key, loaded_birds):
         Is blurred: [Yes/No]
         
         Be exact in the name of the bird. Qualify the exact species. Be specific. Don't use scientific names.
-        The bird is most likely to be shot in India, but might also have been shot in other countries.
+        {f"The probable location where the bird was shot is {location}. So it's likely to be a bird from that region." if location else ""}
+
         You have already identified the following birds: {', '.join(list(set(loaded_birds)))} already. Check if this bird is one of them. If yes, make sure to return the exact same name.
         The last bird you identified was {loaded_birds[-1]}. See if this bird is same as the last bird you identified.
         """
@@ -178,6 +179,71 @@ def identify_bird(image_path, api_key, loaded_birds):
     except Exception as e:
         print(f"Error processing {image_path}: {str(e)}")
         return False, None, False
+
+def get_location_from_exif(image_path):
+    """Extract location from image EXIF data and return a human-readable location."""
+    try:
+        image = Image.open(image_path)
+        exif = image._getexif()
+        if not exif:
+            return None
+            
+        # Get GPS info
+        gps_info = {}
+        for tag_id in exif:
+            tag = TAGS.get(tag_id, tag_id)
+            if tag == 'GPSInfo':
+                for gps_tag in exif[tag_id]:
+                    sub_tag = GPSTAGS.get(gps_tag, gps_tag)
+                    gps_info[sub_tag] = exif[tag_id][gps_tag]
+        
+        if not gps_info:
+            return None
+            
+        # Convert GPS coordinates to decimal degrees
+        lat = gps_info.get('GPSLatitude')
+        lat_ref = gps_info.get('GPSLatitudeRef')
+        lon = gps_info.get('GPSLongitude')
+        lon_ref = gps_info.get('GPSLongitudeRef')
+        
+        if lat and lon:
+            lat = float(lat[0] + lat[1]/60 + lat[2]/3600)
+            lon = float(lon[0] + lon[1]/60 + lon[2]/3600)
+            
+            if lat_ref == 'S':
+                lat = -lat
+            if lon_ref == 'W':
+                lon = -lon
+                
+            # Get location name from coordinates using reverse geocoding
+            try:
+                import requests
+                response = requests.get(f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}")
+                if response.status_code == 200:
+                    data = response.json()
+                    # Extract city, state, and country
+                    address = data.get('address', {})
+                    city = address.get('city') or address.get('town') or address.get('village')
+                    state = address.get('state')
+                    country = address.get('country')
+                    
+                    location_parts = []
+                    if city:
+                        location_parts.append(city)
+                    if state:
+                        location_parts.append(state)
+                    if country:
+                        location_parts.append(country)
+                    
+                    return " ".join(location_parts) if location_parts else None
+            except Exception as e:
+                print(f"Error getting location name: {str(e)}")
+                
+            # If reverse geocoding fails, return coordinates
+            return f"{lat:.6f}, {lon:.6f}"
+    except Exception as e:
+        print(f"Error extracting EXIF location: {str(e)}")
+    return None
 
 class BirdClassifierGUI:
     def __init__(self, root):
@@ -207,9 +273,17 @@ class BirdClassifierGUI:
         ttk.Entry(folder_frame, textvariable=self.folder_path, width=50).pack(side=tk.LEFT, padx=5)
         ttk.Button(folder_frame, text="Browse", command=self.browse_folder).pack(side=tk.LEFT, padx=5)
         
+        # Location input
+        location_frame = ttk.Frame(main_frame)
+        location_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        
+        ttk.Label(location_frame, text="Probable Location:").pack(side=tk.LEFT, padx=5)
+        self.location_var = tk.StringVar()
+        ttk.Entry(location_frame, textvariable=self.location_var, width=50).pack(side=tk.LEFT, padx=5)
+        
         # Buttons frame
         buttons_frame = ttk.Frame(main_frame)
-        buttons_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        buttons_frame.grid(row=3, column=0, columnspan=2, pady=10)
         
         # Start button
         self.start_button = ttk.Button(buttons_frame, text="Start Classification", command=self.start_classification)
@@ -221,7 +295,7 @@ class BirdClassifierGUI:
         
         # Progress frame
         progress_frame = ttk.LabelFrame(main_frame, text="Progress", padding="5")
-        progress_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        progress_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
         
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100)
@@ -232,7 +306,7 @@ class BirdClassifierGUI:
         
         # Last processed image frame
         image_frame = ttk.LabelFrame(main_frame, text="Last Processed Image", padding="5")
-        image_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        image_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
         
         self.image_label = ttk.Label(image_frame)
         self.image_label.grid(row=0, column=0, padx=5, pady=5)
@@ -243,7 +317,7 @@ class BirdClassifierGUI:
         
         # Configure grid weights
         main_frame.columnconfigure(1, weight=1)
-        main_frame.rowconfigure(4, weight=1)
+        main_frame.rowconfigure(5, weight=1)
         
         # Queue for thread communication
         self.queue = Queue()
@@ -306,6 +380,23 @@ class BirdClassifierGUI:
             messagebox.showerror("Error", "Please select an input folder first")
             return
             
+        # Reset progress bar
+        self.progress_var.set(0)
+        self.status_label.config(text="Starting distribution...")
+        
+        # Disable the distribute button while processing
+        self.distribute_button.state(['disabled'])
+        
+        # Start processing in a separate thread
+        thread = threading.Thread(target=self._distribute_photos_thread)
+        thread.daemon = True
+        thread.start()
+        
+        # Start GUI updates
+        self.update_gui()
+    
+    def _distribute_photos_thread(self):
+        """Thread function for distributing photos."""
         try:
             # Create output directory
             output_dir = self.input_dir / '0000-bird-folders'
@@ -315,13 +406,26 @@ class BirdClassifierGUI:
             images = [f for f in output_dir.glob('*') if f.suffix.lower() in ['.jpg', '.jpeg', '.png']]
             total_images = len(images)
             
+            if total_images == 0:
+                self.queue.put({
+                    'type': 'error',
+                    'text': "No images found to distribute"
+                })
+                return
+            
+            # Get API key for bird info
+            api_key = self.api_key_var.get().strip()
+            
+            # Track unique birds for progress
+            unique_birds = set()
+            
             for i, image_path in enumerate(images, 1):
                 # Update progress
                 progress = (i / total_images) * 100
                 self.queue.put({
                     'type': 'progress',
                     'value': progress,
-                    'text': f"Distributing image {i} of {total_images}: {image_path.name}"
+                    'text': f"Processing image {i} of {total_images}: {image_path.name}"
                 })
                 
                 # Extract bird name from filename
@@ -330,21 +434,46 @@ class BirdClassifierGUI:
                 if len(name_parts) > 1:
                     # Get the bird name (last part before extension)
                     bird_name = (" ".join(name_parts[1:])).split(".")[0]
+                    
+                    # Skip if bird is unidentified
+                    if bird_name.lower() == "unidentified":
+                        continue
+                        
+                    unique_birds.add(bird_name)
+                    
                     # Create bird folder
                     bird_folder = output_dir / bird_name
                     bird_folder.mkdir(exist_ok=True)
                     
                     # Move the file to the bird folder
                     shutil.move(str(image_path), str(bird_folder / image_path.name))
+                    
+                    # Create info.txt file if it doesn't exist
+                    info_file = bird_folder / "info.txt"
+                    if not info_file.exists():
+                        self.queue.put({
+                            'type': 'progress',
+                            'value': progress,
+                            'text': f"Creating info file for {bird_name}..."
+                        })
+                        # Get bird information
+                        info_text = get_bird_info(bird_name, api_key)
+                        if info_text:
+                            create_bird_info_file(bird_folder, bird_name, info_text)
+                            self.queue.put({
+                                'type': 'progress',
+                                'value': progress,
+                                'text': f"Created info file for {bird_name}"
+                            })
             
-            # Update final status
+            # Update final status with summary
             self.queue.put({
                 'type': 'progress',
                 'value': 100,
-                'text': "Distribution completed!"
+                'text': f"Distribution completed! Organized {len(unique_birds)} unique bird species."
             })
             
-            messagebox.showinfo("Success", "Photos have been distributed into folders!")
+            messagebox.showinfo("Success", f"Photos have been distributed into folders!\nOrganized {len(unique_birds)} unique bird species.")
             
         except Exception as e:
             self.queue.put({
@@ -352,6 +481,9 @@ class BirdClassifierGUI:
                 'text': f"Error during distribution: {str(e)}"
             })
             messagebox.showerror("Error", f"Error during distribution: {str(e)}")
+        finally:
+            # Re-enable the distribute button
+            self.distribute_button.state(['!disabled'])
 
     def process_photos(self, input_folder, api_key):
         """Process photos from the input folder."""
@@ -375,6 +507,11 @@ class BirdClassifierGUI:
             total_images = len(images)
             loaded_birds = ["None"]
             
+            # Get user's probable location
+            user_location = self.location_var.get().strip()
+            if user_location:
+                user_location = f"Probably {user_location}"
+            
             for i, image_path in enumerate(images, 1):
                 # Update progress
                 progress = (i / total_images) * 100
@@ -384,8 +521,13 @@ class BirdClassifierGUI:
                     'text': f"Processing image {i} of {total_images}: {image_path.name}"
                 })
                 
+                # Get location from EXIF data or use user's input
+                location = get_location_from_exif(image_path)
+                if not location and user_location:
+                    location = user_location
+                
                 # Process image
-                contains_bird, bird_name, is_blurred = identify_bird(image_path, api_key, loaded_birds)
+                contains_bird, bird_name, is_blurred = identify_bird(image_path, api_key, loaded_birds, location)
                 
                 # Update last processed image
                 img = Image.open(image_path)
@@ -395,6 +537,8 @@ class BirdClassifierGUI:
                 status_text = f"Bird: {bird_name if bird_name else 'Unidentified'}"
                 if is_blurred:
                     status_text += " (Blurred)"
+                if location:
+                    status_text += f" ({location})"
                 self.queue.put({
                     'type': 'image',
                     'image': photo,
@@ -402,7 +546,7 @@ class BirdClassifierGUI:
                 })
                 
                 if contains_bird and bird_name:
-                    # Generate new filename with bird name as suffix
+                    # Generate new filename with bird name as suffix (without location)
                     new_filename = get_new_filename(image_path, bird_name, is_blurred)
                     # Create the file in the output directory
                     new_path = output_dir / new_filename
