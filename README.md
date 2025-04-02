@@ -7,7 +7,6 @@ Useful for Bird photographers
 ```
 pip install -r requirements.txt
 python main.py
-
 ```
 
 You will need an Google Gemini API key

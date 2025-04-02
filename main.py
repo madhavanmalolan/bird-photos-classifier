@@ -378,8 +378,6 @@ class BirdClassifierGUI:
             for i, image_path in enumerate(images, 1):
                 # Update progress
                 progress = (i / total_images) * 100
-                if i > 10:
-                    break
                 self.queue.put({
                     'type': 'progress',
                     'value': progress,
