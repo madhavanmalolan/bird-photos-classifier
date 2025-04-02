@@ -4,7 +4,6 @@ __pycache__/
 .DS_Store 
 input/
 output/
-build/*
+build/
 api_key.json
-dist/
 node_modules/
