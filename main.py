@@ -2,14 +2,52 @@ import os
 import shutil
 import argparse
 from pathlib import Path
-import google.genai as genai
-from PIL import Image, ImageTk
-from dotenv import load_dotenv
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-import threading
-from queue import Queue, Empty
-import json
+import sys
+
+# Check for required libraries
+try:
+    import requests
+except ImportError:
+    print("Error: 'requests' library is not installed. Please run: pip install requests")
+    sys.exit(1)
+
+try:
+    import base64
+except ImportError:
+    print("Error: 'base64' module is not available. This is a standard library module and should be available.")
+    sys.exit(1)
+
+try:
+    from PIL import Image, ImageTk
+except ImportError:
+    print("Error: 'Pillow' library is not installed. Please run: pip install Pillow")
+    sys.exit(1)
+
+try:
+    import tkinter as tk
+    from tkinter import ttk, filedialog, messagebox
+except ImportError:
+    print("Error: 'tkinter' is not installed. On macOS, try: brew install python-tk@3.9")
+    sys.exit(1)
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    print("Error: 'python-dotenv' library is not installed. Please run: pip install python-dotenv")
+    sys.exit(1)
+
+try:
+    import json
+except ImportError:
+    print("Error: 'json' module is not available. This is a standard library module and should be available.")
+    sys.exit(1)
+
+try:
+    import threading
+    from queue import Queue, Empty
+except ImportError:
+    print("Error: 'threading' or 'queue' module is not available. These are standard library modules and should be available.")
+    sys.exit(1)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -28,17 +66,44 @@ def save_api_key(api_key):
     with open('api_key.json', 'w') as f:
         json.dump({'api_key': api_key}, f)
 
-# Initialize client with API key
-def init_client(api_key):
-    return genai.Client(api_key=api_key)
+def encode_image(image_path):
+    """Encode image to base64 string."""
+    with open(image_path, 'rb') as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
 
-# Get API key from environment variable or saved file
-GOOGLE_API_KEY = load_saved_api_key()
+def call_gemini_api(api_key, prompt, image_path=None):
+    """Make API call to Gemini."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    
+    headers = {
+        'Content-Type': 'application/json'
+    }
+    
+    parts = [{"text": prompt}]
+    if image_path:
+        image_data = encode_image(image_path)
+        parts.append({
+            "inline_data": {
+                "mime_type": "image/jpeg",
+                "data": image_data
+            }
+        })
+    
+    data = {
+        "contents": [{
+            "parts": parts
+        }]
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"API request failed: {str(e)}")
 
-client = genai.Client(api_key=GOOGLE_API_KEY)
-
-def get_bird_info(bird_name):
-    """Get detailed information about a bird using Gemini AI."""
+def get_bird_info(bird_name, api_key):
+    """Get detailed information about a bird using Gemini API."""
     try:
         prompt = f"""For the bird species '{bird_name}', provide the following information in this exact format:
         Scientific name: [Scientific name]
@@ -48,10 +113,8 @@ def get_bird_info(bird_name):
         Be specific and accurate. The description should be less than 100 words.
         """
         
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[prompt])
-        return response.text
+        response = call_gemini_api(api_key, prompt)
+        return response.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
     except Exception as e:
         print(f"Error getting bird info: {str(e)}")
         return None
@@ -63,53 +126,58 @@ def create_bird_info_file(bird_folder, bird_name, info_text):
         f.write(f"Name: {bird_name}\n\n")
         f.write(info_text)
 
-def get_new_filename(original_path, bird_name):
+def get_new_filename(original_path, bird_name, is_blurred=False):
     """Generate a new filename with bird name as suffix."""
     # Get the original filename without extension
     name = original_path.stem
     # Get the extension
     ext = original_path.suffix
     # Create new filename with bird name as suffix
-    new_name = f"{name}_{bird_name}{ext}"
+    new_name = f"{name} {bird_name}"
+    if is_blurred:
+        new_name += " blurred"
+    new_name += ext
     return new_name
 
-def identify_bird(image_path):
-    """Use Gemini AI to identify if the image contains a bird and get its name."""
+def identify_bird(image_path, api_key, loaded_birds):
+    """Use Gemini API to identify if the image contains a bird and get its name."""
     try:
-        img = Image.open(image_path)
-        prompt = """Analyze this image and tell me:
+        prompt = f"""Analyze this image and tell me:
         1. Does this image contain a bird? (Yes/No)
         2. If yes, what is the name of the bird? (If you can identify it)
+        3. Is the image blurred or out of focus? (Yes/No)
         Please respond in this exact format:
         Contains bird: [Yes/No]
         Bird name: [Name or N/A]
+        Is blurred: [Yes/No]
         
         Be exact in the name of the bird. Qualify the exact species. Be specific. Don't use scientific names.
         The bird is most likely to be shot in India, but might also have been shot in other countries.
+        You have already identified the following birds: {', '.join(list(set(loaded_birds)))} already. Check if this bird is one of them. If yes, make sure to return the exact same name.
+        The last bird you identified was {loaded_birds[-1]}. See if this bird is same as the last bird you identified.
         """
         
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[prompt, img])
-        response_text = response.text
+        response = call_gemini_api(api_key, prompt, image_path)
+        response_text = response.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
         print(response_text)
         
         # Parse the response
         contains_bird = "Contains bird: Yes" in response_text
         bird_name = None
+        is_blurred = False
         
-        if contains_bird:
-            for line in response_text.split('\n'):
-                if line.startswith('Bird name:'):
-                    bird_name = line.replace('Bird name:', '').strip()
-                    if bird_name.lower() == 'n/a':
-                        bird_name = None
-                    break
+        for line in response_text.split('\n'):
+            if line.startswith('Bird name:'):
+                bird_name = line.replace('Bird name:', '').strip()
+                if bird_name.lower() == 'n/a':
+                    bird_name = None
+            elif line.startswith('Is blurred:'):
+                is_blurred = "Is blurred: Yes" in line
         
-        return contains_bird, bird_name
+        return contains_bird, bird_name, is_blurred
     except Exception as e:
         print(f"Error processing {image_path}: {str(e)}")
-        return False, None
+        return False, None, False
 
 class BirdClassifierGUI:
     def __init__(self, root):
@@ -139,9 +207,17 @@ class BirdClassifierGUI:
         ttk.Entry(folder_frame, textvariable=self.folder_path, width=50).pack(side=tk.LEFT, padx=5)
         ttk.Button(folder_frame, text="Browse", command=self.browse_folder).pack(side=tk.LEFT, padx=5)
         
+        # Buttons frame
+        buttons_frame = ttk.Frame(main_frame)
+        buttons_frame.grid(row=2, column=0, columnspan=2, pady=10)
+        
         # Start button
-        self.start_button = ttk.Button(main_frame, text="Start Classification", command=self.start_classification)
-        self.start_button.grid(row=2, column=0, columnspan=2, pady=10)
+        self.start_button = ttk.Button(buttons_frame, text="Start Classification", command=self.start_classification)
+        self.start_button.pack(side=tk.LEFT, padx=5)
+        
+        # Distribute button (initially disabled)
+        self.distribute_button = ttk.Button(buttons_frame, text="Distribute into Folders", command=self.distribute_photos, state='disabled')
+        self.distribute_button.pack(side=tk.LEFT, padx=5)
         
         # Progress frame
         progress_frame = ttk.LabelFrame(main_frame, text="Progress", padding="5")
@@ -172,8 +248,8 @@ class BirdClassifierGUI:
         # Queue for thread communication
         self.queue = Queue()
         
-        # Initialize client as None
-        self.client = None
+        # Store the input directory path
+        self.input_dir = None
     
     def browse_folder(self):
         folder = filedialog.askdirectory()
@@ -207,13 +283,6 @@ class BirdClassifierGUI:
             return
         save_api_key(api_key)
         
-        # Initialize Gemini client with the API key
-        try:
-            self.client = init_client(api_key)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to initialize API client: {str(e)}")
-            return
-        
         folder = self.folder_path.get()
         if not folder:
             messagebox.showerror("Error", "Please select an input folder")
@@ -224,33 +293,26 @@ class BirdClassifierGUI:
         self.status_label.config(text="Starting classification...")
         
         # Start processing in a separate thread
-        thread = threading.Thread(target=self.process_photos, args=(folder,))
+        thread = threading.Thread(target=self.process_photos, args=(folder, api_key))
         thread.daemon = True
         thread.start()
         
         # Start GUI updates
         self.update_gui()
     
-    def process_photos(self, input_folder):
-        """Process photos from the input folder."""
+    def distribute_photos(self):
+        """Distribute photos into folders based on their names."""
+        if not self.input_dir:
+            messagebox.showerror("Error", "Please select an input folder first")
+            return
+            
         try:
-            # Convert input folder to Path object
-            input_dir = Path(input_folder)
-            if not input_dir.exists():
-                self.queue.put({
-                    'type': 'error',
-                    'text': f"Input folder '{input_folder}' does not exist"
-                })
-                return
-            
-            # Create output directory inside input folder
-            output_dir = input_dir / '0000-bird-folders'
-            unidentified_dir = output_dir / "Unidentified"
+            # Create output directory
+            output_dir = self.input_dir / '0000-bird-folders'
             output_dir.mkdir(exist_ok=True)
-            unidentified_dir.mkdir(exist_ok=True)
             
-            # Get list of images
-            images = [f for f in input_dir.glob('*') if f.suffix.lower() in ['.jpg', '.jpeg', '.png']]
+            # Get all image files
+            images = [f for f in output_dir.glob('*') if f.suffix.lower() in ['.jpg', '.jpeg', '.png']]
             total_images = len(images)
             
             for i, image_path in enumerate(images, 1):
@@ -259,56 +321,122 @@ class BirdClassifierGUI:
                 self.queue.put({
                     'type': 'progress',
                     'value': progress,
+                    'text': f"Distributing image {i} of {total_images}: {image_path.name}"
+                })
+                
+                # Extract bird name from filename
+                # Format: original_name bird_name.extension
+                name_parts = image_path.stem.split()
+                if len(name_parts) > 1:
+                    # Get the bird name (last part before extension)
+                    bird_name = (" ".join(name_parts[1:])).split(".")[0]
+                    # Create bird folder
+                    bird_folder = output_dir / bird_name
+                    bird_folder.mkdir(exist_ok=True)
+                    
+                    # Move the file to the bird folder
+                    shutil.move(str(image_path), str(bird_folder / image_path.name))
+            
+            # Update final status
+            self.queue.put({
+                'type': 'progress',
+                'value': 100,
+                'text': "Distribution completed!"
+            })
+            
+            messagebox.showinfo("Success", "Photos have been distributed into folders!")
+            
+        except Exception as e:
+            self.queue.put({
+                'type': 'error',
+                'text': f"Error during distribution: {str(e)}"
+            })
+            messagebox.showerror("Error", f"Error during distribution: {str(e)}")
+
+    def process_photos(self, input_folder, api_key):
+        """Process photos from the input folder."""
+        try:
+            # Store input directory for later use
+            self.input_dir = Path(input_folder)
+            
+            if not self.input_dir.exists():
+                self.queue.put({
+                    'type': 'error',
+                    'text': f"Input folder '{input_folder}' does not exist"
+                })
+                return
+            
+            # Create output directory
+            output_dir = self.input_dir / '0000-bird-folders'
+            output_dir.mkdir(exist_ok=True)
+            
+            # Get list of images
+            images = [f for f in self.input_dir.glob('*') if f.suffix.lower() in ['.jpg', '.jpeg', '.png']]
+            total_images = len(images)
+            loaded_birds = ["None"]
+            
+            for i, image_path in enumerate(images, 1):
+                # Update progress
+                progress = (i / total_images) * 100
+                if i > 10:
+                    break
+                self.queue.put({
+                    'type': 'progress',
+                    'value': progress,
                     'text': f"Processing image {i} of {total_images}: {image_path.name}"
                 })
                 
                 # Process image
-                contains_bird, bird_name = identify_bird(image_path)
+                contains_bird, bird_name, is_blurred = identify_bird(image_path, api_key, loaded_birds)
                 
                 # Update last processed image
                 img = Image.open(image_path)
                 # Resize image to fit GUI
                 img.thumbnail((400, 400))
                 photo = ImageTk.PhotoImage(img)
+                status_text = f"Bird: {bird_name if bird_name else 'Unidentified'}"
+                if is_blurred:
+                    status_text += " (Blurred)"
                 self.queue.put({
                     'type': 'image',
                     'image': photo,
-                    'text': f"Bird: {bird_name if bird_name else 'Unidentified'}"
+                    'text': status_text
                 })
                 
                 if contains_bird and bird_name:
-                    # Create bird folder if it doesn't exist
-                    bird_folder = output_dir / bird_name
-                    bird_folder.mkdir(exist_ok=True)
-                    
-                    # Create info file if it doesn't exist
-                    info_file = bird_folder / "info.txt"
-                    if not info_file.exists():
-                        info_text = get_bird_info(bird_name)
-                        if info_text:
-                            create_bird_info_file(bird_folder, bird_name, info_text)
-                    
                     # Generate new filename with bird name as suffix
-                    new_filename = get_new_filename(image_path, bird_name)
+                    new_filename = get_new_filename(image_path, bird_name, is_blurred)
+                    # Create the file in the output directory
+                    new_path = output_dir / new_filename
                     
-                    # Copy the image to the bird folder with new name
-                    shutil.copy2(image_path, bird_folder / new_filename)
+                    # Copy the file to the output directory with new name
+                    shutil.copy2(str(image_path), str(new_path))
+                    loaded_birds.append(bird_name)
                 else:
-                    # Move unidentified photos to the Unidentified folder
-                    shutil.copy2(image_path, unidentified_dir / image_path.name)
+                    # Handle unidentified birds the same way as identified ones
+                    new_filename = get_new_filename(image_path, "Unidentified", is_blurred)
+                    new_path = output_dir / new_filename
+                    shutil.copy2(str(image_path), str(new_path))
+                    loaded_birds.append("Unidentified")
             
             # Update final status
             self.queue.put({
                 'type': 'progress',
                 'value': 100,
-                'text': "Classification completed!"
+                'text': "Classification completed! Click 'Distribute into Folders' to organize the photos."
             })
+            
+            # Enable the distribute button
+            self.distribute_button.state(['!disabled'])
+            
+            messagebox.showinfo("Success", "Classification completed! Click 'Distribute into Folders' to organize the photos.")
             
         except Exception as e:
             self.queue.put({
                 'type': 'error',
                 'text': f"Error: {str(e)}"
             })
+            messagebox.showerror("Error", f"Error during classification: {str(e)}")
         finally:
             self.start_button.state(['!disabled'])
 

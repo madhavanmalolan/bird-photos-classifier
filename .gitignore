@@ -6,3 +6,5 @@ input/
 output/
 build/*
 api_key.json
+dist/
+node_modules/
