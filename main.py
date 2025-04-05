@@ -293,6 +293,11 @@ class BirdClassifierGUI:
     def browse_folder(self):
         folder = filedialog.askdirectory()
         if folder:
+            # If folder name starts with "0000", use its parent folder
+            folder_path = Path(folder)
+            if folder_path.name.startswith("0000"):
+                folder = str(folder_path.parent)
+            
             self.folder_path.set(folder)
             # Enable both start and distribute buttons when folder is selected
             self.start_button.state(['!disabled'])
