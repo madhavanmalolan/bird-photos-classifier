@@ -11,7 +11,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-You will need an Google Gemini API key
+You will need an Google Gemini API key, you can [create an API Key here](https://aistudio.google.com/apikey).
 
 ## Distribute
 ```
