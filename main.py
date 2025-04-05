@@ -3,51 +3,16 @@ import shutil
 import argparse
 from pathlib import Path
 import sys
-
-# Check for required libraries
-try:
-    import requests
-except ImportError:
-    print("Error: 'requests' library is not installed. Please run: pip install requests")
-    sys.exit(1)
-
-try:
-    import base64
-except ImportError:
-    print("Error: 'base64' module is not available. This is a standard library module and should be available.")
-    sys.exit(1)
-
-try:
-    from PIL import Image, ImageTk
-except ImportError:
-    print("Error: 'Pillow' library is not installed. Please run: pip install Pillow")
-    sys.exit(1)
-
-try:
-    import tkinter as tk
-    from tkinter import ttk, filedialog, messagebox
-except ImportError:
-    print("Error: 'tkinter' is not installed. On macOS, try: brew install python-tk@3.9")
-    sys.exit(1)
-
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    print("Error: 'python-dotenv' library is not installed. Please run: pip install python-dotenv")
-    sys.exit(1)
-
-try:
-    import json
-except ImportError:
-    print("Error: 'json' module is not available. This is a standard library module and should be available.")
-    sys.exit(1)
-
-try:
-    import threading
-    from queue import Queue, Empty
-except ImportError:
-    print("Error: 'threading' or 'queue' module is not available. These are standard library modules and should be available.")
-    sys.exit(1)
+import re
+import requests
+import base64
+from PIL import Image, ImageTk
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+from dotenv import load_dotenv
+import threading
+from queue import Queue, Empty
+import json
 
 # Load environment variables from .env file
 load_dotenv()
@@ -116,7 +81,6 @@ def get_bird_info(bird_name, api_key):
         response = call_gemini_api(api_key, prompt)
         return response.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
     except Exception as e:
-        print(f"Error getting bird info: {str(e)}")
         return None
 
 def create_bird_info_file(bird_folder, bird_name, info_text):
@@ -160,7 +124,6 @@ def identify_bird(image_path, api_key, loaded_birds, location):
         
         response = call_gemini_api(api_key, prompt, image_path)
         response_text = response.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
-        print(response_text)
         
         # Parse the response
         contains_bird = "Contains bird: Yes" in response_text
@@ -170,11 +133,12 @@ def identify_bird(image_path, api_key, loaded_birds, location):
         for line in response_text.split('\n'):
             if line.startswith('Bird name:'):
                 bird_name = line.replace('Bird name:', '').strip()
+                # Filter out non-alphabet characters
+                bird_name = re.sub(r'[^a-zA-Z\s]', '', bird_name).strip()
                 if bird_name.lower() == 'n/a':
                     bird_name = None
             elif line.startswith('Is blurred:'):
                 is_blurred = "Is blurred: Yes" in line
-        
         return contains_bird, bird_name, is_blurred
     except Exception as e:
         print(f"Error processing {image_path}: {str(e)}")
@@ -182,6 +146,7 @@ def identify_bird(image_path, api_key, loaded_birds, location):
 
 def get_location_from_exif(image_path):
     """Extract location from image EXIF data and return a human-readable location."""
+    return None
     try:
         image = Image.open(image_path)
         exif = image._getexif()
@@ -329,6 +294,9 @@ class BirdClassifierGUI:
         folder = filedialog.askdirectory()
         if folder:
             self.folder_path.set(folder)
+            # Enable both start and distribute buttons when folder is selected
+            self.start_button.state(['!disabled'])
+            self.distribute_button.state(['!disabled'])
     
     def update_gui(self):
         """Update GUI elements from the queue"""
@@ -375,6 +343,7 @@ class BirdClassifierGUI:
         self.update_gui()
     
     def distribute_photos(self):
+        self.input_dir = Path(self.folder_path.get())
         """Distribute photos into folders based on their names."""
         if not self.input_dir:
             messagebox.showerror("Error", "Please select an input folder first")
@@ -435,8 +404,8 @@ class BirdClassifierGUI:
                     # Get the bird name (last part before extension)
                     bird_name = (" ".join(name_parts[1:])).split(".")[0]
                     
-                    # Skip if bird is unidentified
-                    if bird_name.lower() == "unidentified":
+                    # Skip if bird is unidentified or if there's no bird name
+                    if bird_name.lower() == "unidentified" or not bird_name:
                         continue
                         
                     unique_birds.add(bird_name)
@@ -528,7 +497,6 @@ class BirdClassifierGUI:
                 
                 # Process image
                 contains_bird, bird_name, is_blurred = identify_bird(image_path, api_key, loaded_birds, location)
-                
                 # Update last processed image
                 img = Image.open(image_path)
                 # Resize image to fit GUI
@@ -545,7 +513,7 @@ class BirdClassifierGUI:
                     'text': status_text
                 })
                 
-                if contains_bird and bird_name:
+                if bird_name and bird_name != "NA" and bird_name != "N/A" and bird_name != "Unidentified":
                     # Generate new filename with bird name as suffix (without location)
                     new_filename = get_new_filename(image_path, bird_name, is_blurred)
                     # Create the file in the output directory
@@ -578,11 +546,15 @@ class BirdClassifierGUI:
                 'type': 'error',
                 'text': f"Error: {str(e)}"
             })
-            messagebox.showerror("Error", f"Error during classification: {str(e)}")
+            print(f"Error during classification: {str(e)}")
+            #messagebox.showerror("Error", f"Error during classification: {str(e)}")
         finally:
             self.start_button.state(['!disabled'])
+            # Always enable the distribute button
+            self.distribute_button.state(['!disabled'])
 
 def main():
+    print("Starting application. This might take upto 2 minutes.")
     root = tk.Tk()
     app = BirdClassifierGUI(root)
     root.mainloop()
