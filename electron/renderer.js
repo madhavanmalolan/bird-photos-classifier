@@ -132,7 +132,7 @@ async function identifyBird(imagePath, apiKey) {
     const imageData = fs.readFileSync(imagePath, 'base64');
     
     const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent?key=${apiKey}`,
         {
             contents: [{
                 parts: [
@@ -174,7 +174,7 @@ async function identifyBird(imagePath, apiKey) {
 
 async function getBirdInfo(birdName, apiKey) {
     const response = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent?key=${apiKey}`,
         {
             contents: [{
                 parts: [{
