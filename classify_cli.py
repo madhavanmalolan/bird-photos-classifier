@@ -125,7 +125,7 @@ def identify_bird(image_path, api_key, loaded_birds, location):
         for line in response_text.split('\n'):
             if line.startswith('Bird name:'):
                 bird_name = line.replace('Bird name:', '').strip()
-                bird_name = re.sub(r'[^a-zA-Z\s]', '', bird_name).strip()
+                bird_name = re.sub(r'[^a-zA-Z\s\'\-]', '', bird_name).strip()
                 if bird_name.lower() == 'n/a':
                     bird_name = None
             elif line.startswith('Is blurred:'):
@@ -147,8 +147,8 @@ def process_folder(input_folder, api_key, location=None):
     output_dir = input_dir / '0000-bird-folders'
     output_dir.mkdir(exist_ok=True)
 
-    # Get list of images
-    images = [f for f in input_dir.glob('*') if f.suffix.lower() in ['.jpg', '.jpeg', '.png']]
+    # Get list of images (skip macOS metadata files starting with ._ )
+    images = [f for f in input_dir.glob('*') if f.suffix.lower() in ['.jpg', '.jpeg', '.png'] and not f.name.startswith('._') and not f.name.startswith('.')]
     total_images = len(images)
 
     if total_images == 0:
@@ -190,7 +190,7 @@ def process_folder(input_folder, api_key, location=None):
 
 def distribute_photos(output_dir, api_key):
     """Distribute photos into folders based on their names."""
-    images = [f for f in output_dir.glob('*') if f.suffix.lower() in ['.jpg', '.jpeg', '.png']]
+    images = [f for f in output_dir.glob('*') if f.suffix.lower() in ['.jpg', '.jpeg', '.png'] and not f.name.startswith('._') and not f.name.startswith('.')]
     total_images = len(images)
 
     if total_images == 0:
