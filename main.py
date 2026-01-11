@@ -735,7 +735,12 @@ Create a SQUARE edited version of this image following these requirements."""
             edited_image = self._extract_image_from_response(response)
 
             if not edited_image:
-                raise Exception("No image was returned by the AI. The API may not support image editing yet.")
+                error_msg = "No image was returned by the AI."
+                if hasattr(self, '_last_api_text_response') and self._last_api_text_response:
+                    error_msg += f"\n\nAPI Response: {self._last_api_text_response[:300]}"
+                else:
+                    error_msg += " The API may not support image editing yet, or it may have filtered the request."
+                raise Exception(error_msg)
 
             self.queue.put({'type': 'edit_progress', 'value': 90, 'text': 'Finalizing and ensuring square output...'})
 
@@ -778,7 +783,7 @@ Create a SQUARE edited version of this image following these requirements."""
             if not candidates:
                 print("No candidates in response")
                 # Print full response for debugging
-                print(f"Full response: {json.dumps(response, indent=2)[:500]}")
+                print(f"Full response: {json.dumps(response, indent=2)}")
                 return None
 
             for i, candidate in enumerate(candidates):
@@ -789,6 +794,14 @@ Create a SQUARE edited version of this image following these requirements."""
 
                 for j, part in enumerate(parts):
                     print(f"Part {j} keys: {part.keys()}")
+
+                    # Check if API returned text instead of image
+                    if 'text' in part:
+                        text_response = part['text']
+                        print(f"API returned text instead of image: {text_response[:200]}")
+                        # Store this for better error message
+                        self._last_api_text_response = text_response
+
                     # Check for inline_data with image
                     if 'inline_data' in part:
                         inline_data = part['inline_data']
@@ -811,6 +824,7 @@ Create a SQUARE edited version of this image following these requirements."""
                             return image
 
             print("No image found in response")
+            print(f"Full response for debugging: {json.dumps(response, indent=2)}")
             return None
 
         except Exception as e:
