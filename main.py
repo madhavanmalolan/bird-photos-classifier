@@ -6,13 +6,15 @@ import sys
 import re
 import requests
 import base64
-from PIL import Image, ImageTk
+from io import BytesIO
+from PIL import Image, ImageTk, ImageEnhance, ImageFilter, ImageDraw
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from dotenv import load_dotenv
 import threading
 from queue import Queue, Empty
 import json
+import tempfile
 
 # Load environment variables from .env file
 load_dotenv()
@@ -66,11 +68,11 @@ def encode_image(image_path):
 def call_gemini_api(api_key, prompt, image_path=None):
     """Make API call to Gemini."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={api_key}"
-    
+
     headers = {
         'Content-Type': 'application/json'
     }
-    
+
     parts = [{"text": prompt}]
     if image_path:
         image_data = encode_image(image_path)
@@ -80,19 +82,70 @@ def call_gemini_api(api_key, prompt, image_path=None):
                 "data": image_data
             }
         })
-    
+
     data = {
         "contents": [{
             "parts": parts
         }]
     }
-    
+
     try:
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
         raise Exception(f"API request failed: {str(e)}")
+
+def call_gemini_image_api(api_key, prompt, image_path=None, watermark_path=None):
+    """Make API call to Gemini for image generation/editing."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent"
+
+    headers = {
+        'x-goog-api-key': api_key,
+        'Content-Type': 'application/json'
+    }
+
+    parts = [{"text": prompt}]
+
+    # Add main image
+    if image_path:
+        image_data = encode_image(image_path)
+        parts.append({
+            "inline_data": {
+                "mime_type": "image/jpeg",
+                "data": image_data
+            }
+        })
+
+    # Add watermark image
+    if watermark_path:
+        watermark_data = encode_image(watermark_path)
+        parts.append({
+            "inline_data": {
+                "mime_type": "image/jpeg",
+                "data": watermark_data
+            }
+        })
+
+    data = {
+        "contents": [{
+            "parts": parts
+        }]
+    }
+
+    try:
+        print(f"Calling Gemini Image API with prompt length: {len(prompt)}")
+        print(f"Sending {len(parts)} parts (text + {len(parts)-1} images)")
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        result = response.json()
+        print(f"Image API Response status: {response.status_code}")
+        return result
+    except requests.exceptions.RequestException as e:
+        print(f"Image API Request Error: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Response text: {e.response.text[:500]}")
+        raise Exception(f"Image API request failed: {str(e)}")
 
 def get_bird_info(bird_name, api_key):
     """Get detailed information about a bird using Gemini API."""
@@ -272,6 +325,10 @@ class BirdClassifierGUI:
         distributor_frame = ttk.Frame(self.notebook, padding="10")
         self.notebook.add(distributor_frame, text="Distributor")
 
+        # Create Editing tab
+        editing_frame = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(editing_frame, text="Editing")
+
         # Configure grid weights for main frame
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(1, weight=1)
@@ -281,6 +338,9 @@ class BirdClassifierGUI:
 
         # Setup Distributor tab
         self.setup_distributor_tab(distributor_frame)
+
+        # Setup Editing tab
+        self.setup_editing_tab(editing_frame)
 
         # Queue for thread communication
         self.queue = Queue()
@@ -405,7 +465,67 @@ class BirdClassifierGUI:
         # Configure grid weights for distributor tab
         parent.columnconfigure(1, weight=1)
         parent.rowconfigure(4, weight=1)
-    
+
+    def setup_editing_tab(self, parent):
+        """Setup the Editing tab content"""
+        # Image selection frame
+        image_frame = ttk.Frame(parent)
+        image_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(image_frame, text="Select Image:").pack(side=tk.LEFT, padx=5)
+        self.edit_image_path = tk.StringVar()
+        ttk.Entry(image_frame, textvariable=self.edit_image_path, width=50).pack(side=tk.LEFT, padx=5)
+        ttk.Button(image_frame, text="Browse", command=self.browse_edit_image).pack(side=tk.LEFT, padx=5)
+
+        # Edit button
+        edit_button_frame = ttk.Frame(parent)
+        edit_button_frame.grid(row=1, column=0, columnspan=2, pady=10)
+
+        self.edit_button = ttk.Button(edit_button_frame, text="Apply AI Editing", command=self.apply_ai_edit)
+        self.edit_button.pack(side=tk.LEFT, padx=5)
+
+        # Progress frame
+        edit_progress_frame = ttk.LabelFrame(parent, text="Progress", padding="5")
+        edit_progress_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        self.edit_progress_var = tk.DoubleVar()
+        self.edit_progress_bar = ttk.Progressbar(edit_progress_frame, variable=self.edit_progress_var, maximum=100)
+        self.edit_progress_bar.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
+
+        self.edit_status_label = ttk.Label(edit_progress_frame, text="Ready")
+        self.edit_status_label.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
+
+        # Image display frame
+        display_frame = ttk.LabelFrame(parent, text="Edited Image", padding="5")
+        display_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+
+        self.edit_image_label = ttk.Label(display_frame)
+        self.edit_image_label.grid(row=0, column=0, padx=5, pady=5)
+
+        # Modification input frame
+        modify_frame = ttk.LabelFrame(parent, text="Make Changes to the Edit", padding="5")
+        modify_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        self.edit_modify_text = tk.StringVar()
+        ttk.Entry(modify_frame, textvariable=self.edit_modify_text, width=60).pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Button(modify_frame, text="Apply", command=self.apply_edit_modification).pack(side=tk.LEFT, padx=5)
+
+        # Save button
+        save_button_frame = ttk.Frame(parent)
+        save_button_frame.grid(row=5, column=0, columnspan=2, pady=10)
+
+        self.save_edit_button = ttk.Button(save_button_frame, text="Save Edited Image", command=self.save_edited_image, state='disabled')
+        self.save_edit_button.pack(side=tk.LEFT, padx=5)
+
+        # Configure grid weights for editing tab
+        parent.columnconfigure(1, weight=1)
+        parent.rowconfigure(3, weight=1)
+
+        # Store original and edited images
+        self.original_edit_image = None
+        self.current_edited_image = None
+        self.current_edited_photo = None
+
     def browse_folder(self):
         folder = filedialog.askdirectory()
         if folder:
@@ -459,11 +579,275 @@ class BirdClassifierGUI:
                     self.dist_status_label.config(text=msg['text'])
                 elif msg['type'] == 'dist_log':
                     self.dist_log(msg['text'])
+                elif msg['type'] == 'edit_progress':
+                    self.edit_progress_var.set(msg['value'])
+                    self.edit_status_label.config(text=msg['text'])
+                elif msg['type'] == 'edit_image':
+                    self.edit_image_label.configure(image=msg['image'])
+                    self.current_edited_photo = msg['image']
         except Empty:
             pass
         finally:
             self.root.after(100, self.update_gui)
-    
+
+    def browse_edit_image(self):
+        """Browse for image to edit"""
+        file_path = filedialog.askopenfilename(
+            title="Select Image",
+            filetypes=[("Image files", "*.jpg *.jpeg *.png"), ("All files", "*.*")]
+        )
+        if file_path:
+            self.edit_image_path.set(file_path)
+
+    def apply_ai_edit(self):
+        """Apply AI-guided editing to the image"""
+        image_path = self.edit_image_path.get()
+        if not image_path:
+            messagebox.showerror("Error", "Please select an image first")
+            return
+
+        api_key = self.api_key_var.get().strip()
+        if not api_key:
+            messagebox.showerror("Error", "Please enter your Google API Key")
+            return
+
+        # Disable button and reset progress
+        self.edit_button.state(['disabled'])
+        self.edit_progress_var.set(0)
+        self.edit_status_label.config(text="Starting AI editing...")
+
+        # Start editing in a separate thread
+        thread = threading.Thread(target=self._perform_ai_edit, args=(image_path, api_key, None))
+        thread.daemon = True
+        thread.start()
+
+    def apply_edit_modification(self):
+        """Apply modifications to the edited image"""
+        if not self.original_edit_image:
+            messagebox.showerror("Error", "Please apply AI editing first")
+            return
+
+        modification = self.edit_modify_text.get().strip()
+        if not modification:
+            messagebox.showerror("Error", "Please enter modification instructions")
+            return
+
+        api_key = self.api_key_var.get().strip()
+        if not api_key:
+            messagebox.showerror("Error", "Please enter your Google API Key")
+            return
+
+        # Reset progress
+        self.edit_progress_var.set(0)
+        self.edit_status_label.config(text="Applying modifications...")
+
+        # Start editing in a separate thread
+        thread = threading.Thread(target=self._perform_ai_edit, args=(self.edit_image_path.get(), api_key, modification))
+        thread.daemon = True
+        thread.start()
+
+    def save_edited_image(self):
+        """Save the edited image"""
+        if not self.current_edited_image:
+            messagebox.showerror("Error", "No edited image to save")
+            return
+
+        # Ask for save location
+        file_path = filedialog.asksaveasfilename(
+            title="Save Edited Image",
+            defaultextension=".jpg",
+            filetypes=[("JPEG files", "*.jpg"), ("PNG files", "*.png"), ("All files", "*.*")]
+        )
+
+        if file_path:
+            try:
+                self.current_edited_image.save(file_path, quality=95)
+                messagebox.showinfo("Success", f"Image saved to {file_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save image: {str(e)}")
+
+    def _perform_ai_edit(self, image_path, api_key, modification=None):
+        """Perform AI-guided editing in background thread"""
+        try:
+            # Load original image if not already loaded
+            if not self.original_edit_image:
+                self.queue.put({'type': 'edit_progress', 'value': 10, 'text': 'Loading image...'})
+                self.original_edit_image = Image.open(image_path)
+
+            self.queue.put({'type': 'edit_progress', 'value': 20, 'text': 'Sending to AI for editing...'})
+
+            # Save image to temp file for API
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+                self.original_edit_image.save(tmp.name, format='JPEG', quality=95)
+                temp_path = tmp.name
+
+            # Check if watermark exists
+            watermark_path = Path('watermark.jpg')
+            watermark_exists = watermark_path.exists()
+
+            # Create prompt for AI
+            watermark_instruction = """
+- Place the watermark image (second image) in the BOTTOM RIGHT corner
+- Make the watermark VERY SMALL (approximately 5% of the image width)
+- Remove the background from the watermark, make it transparent
+- The watermark should be subtle and not distract from the bird""" if watermark_exists else ""
+
+            if modification:
+                prompt = f"""Edit this bird photograph with the following changes: {modification}
+
+CRITICAL REQUIREMENTS:
+- DO NOT change the bird itself or the surroundings
+- You CAN: zoom in/out, pan (move the frame), crop, adjust lighting, colors, contrast, and sharpness
+- Make the output a SQUARE image (1:1 aspect ratio) - VERY IMPORTANT
+- Zoom and pan to frame the bird for the best professional composition
+- Apply professional color grading like a National Geographic photographer
+- The bird and background must remain unchanged - only enhance through zoom, pan, and lighting adjustments{watermark_instruction}
+
+Create a SQUARE edited version of this image following these requirements."""
+            else:
+                prompt = f"""Edit this bird photograph to create a professional National Geographic-style image.
+
+CRITICAL REQUIREMENTS:
+- DO NOT change the bird itself or the surroundings
+- You CAN: zoom in/out, pan (move the frame), crop, adjust lighting, colors, contrast, and sharpness
+- Make the output a SQUARE image (1:1 aspect ratio) - VERY IMPORTANT
+- Zoom and pan to frame the bird for the best professional composition
+- Fix color profile and lighting for professional look
+- Enhance sharpness and contrast
+- The bird and background must remain unchanged - only enhance through zoom, pan, and lighting adjustments{watermark_instruction}
+
+Create a SQUARE edited version of this image following these requirements."""
+
+            self.queue.put({'type': 'edit_progress', 'value': 40, 'text': 'AI is processing the image...'})
+
+            # Call Gemini image API with watermark if it exists
+            if watermark_exists:
+                response = call_gemini_image_api(api_key, prompt, temp_path, str(watermark_path))
+            else:
+                response = call_gemini_image_api(api_key, prompt, temp_path)
+
+            # Clean up temp file
+            os.remove(temp_path)
+
+            self.queue.put({'type': 'edit_progress', 'value': 70, 'text': 'Extracting edited image...'})
+
+            # Extract the image from response
+            edited_image = self._extract_image_from_response(response)
+
+            if not edited_image:
+                raise Exception("No image was returned by the AI. The API may not support image editing yet.")
+
+            self.queue.put({'type': 'edit_progress', 'value': 90, 'text': 'Finalizing and ensuring square output...'})
+
+            # Ensure the image is square
+            edited_image = self._ensure_square_image(edited_image)
+
+            # Store the edited image
+            self.current_edited_image = edited_image
+
+            # Display the edited image
+            display_image = edited_image.copy()
+            display_image.thumbnail((600, 600))
+            photo = ImageTk.PhotoImage(display_image)
+
+            self.queue.put({'type': 'edit_image', 'image': photo})
+            self.queue.put({'type': 'edit_progress', 'value': 100, 'text': 'Editing complete!'})
+
+            # Enable save button
+            self.save_edit_button.state(['!disabled'])
+
+        except Exception as e:
+            self.queue.put({
+                'type': 'messagebox_error',
+                'title': 'Error',
+                'text': f"Error during editing: {str(e)}"
+            })
+            print(f"Error during AI editing: {str(e)}")
+        finally:
+            self.edit_button.state(['!disabled'])
+
+    def _extract_image_from_response(self, response):
+        """Extract image data from Gemini API response"""
+        try:
+            # Debug: Print response structure
+            print(f"API Response keys: {response.keys()}")
+
+            # The response structure may contain image data in different formats
+            # Check for inline_data in parts
+            candidates = response.get('candidates', [])
+            if not candidates:
+                print("No candidates in response")
+                # Print full response for debugging
+                print(f"Full response: {json.dumps(response, indent=2)[:500]}")
+                return None
+
+            for i, candidate in enumerate(candidates):
+                print(f"Candidate {i}: {candidate.keys()}")
+                content = candidate.get('content', {})
+                parts = content.get('parts', [])
+                print(f"Number of parts: {len(parts)}")
+
+                for j, part in enumerate(parts):
+                    print(f"Part {j} keys: {part.keys()}")
+                    # Check for inline_data with image
+                    if 'inline_data' in part:
+                        inline_data = part['inline_data']
+                        if 'data' in inline_data:
+                            print("Found image data in inline_data")
+                            # Decode base64 image
+                            image_data = base64.b64decode(inline_data['data'])
+                            # Convert to PIL Image
+                            image = Image.open(BytesIO(image_data))
+                            return image
+                    # Also check for inlineData (camelCase)
+                    elif 'inlineData' in part:
+                        inline_data = part['inlineData']
+                        if 'data' in inline_data:
+                            print("Found image data in inlineData")
+                            # Decode base64 image
+                            image_data = base64.b64decode(inline_data['data'])
+                            # Convert to PIL Image
+                            image = Image.open(BytesIO(image_data))
+                            return image
+
+            print("No image found in response")
+            return None
+
+        except Exception as e:
+            print(f"Error extracting image from response: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _ensure_square_image(self, image):
+        """Ensure the image is perfectly square"""
+        width, height = image.size
+        print(f"Image dimensions: {width}x{height}")
+
+        if width == height:
+            print("Image is already square")
+            return image
+
+        # Make it square by cropping to the smaller dimension (center crop)
+        size = min(width, height)
+
+        if width > height:
+            # Crop horizontally
+            left = (width - size) // 2
+            top = 0
+            right = left + size
+            bottom = size
+        else:
+            # Crop vertically
+            left = 0
+            top = (height - size) // 2
+            right = size
+            bottom = top + size
+
+        print(f"Cropping to square: {size}x{size}")
+        cropped = image.crop((left, top, right, bottom))
+        return cropped
+
     def start_classification(self):
         # Save API key
         api_key = self.api_key_var.get().strip()
