@@ -495,12 +495,46 @@ class BirdClassifierGUI:
         self.edit_status_label = ttk.Label(edit_progress_frame, text="Ready")
         self.edit_status_label.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
 
-        # Image display frame
+        # Image display frame with zoom controls
         display_frame = ttk.LabelFrame(parent, text="Edited Image", padding="5")
         display_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
 
-        self.edit_image_label = ttk.Label(display_frame)
-        self.edit_image_label.grid(row=0, column=0, padx=5, pady=5)
+        # Zoom controls
+        zoom_control_frame = ttk.Frame(display_frame)
+        zoom_control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
+
+        ttk.Button(zoom_control_frame, text="-", width=3, command=self.zoom_out).pack(side=tk.LEFT, padx=2)
+        ttk.Button(zoom_control_frame, text="+", width=3, command=self.zoom_in).pack(side=tk.LEFT, padx=2)
+        ttk.Button(zoom_control_frame, text="Reset", command=self.zoom_reset).pack(side=tk.LEFT, padx=2)
+        self.zoom_label = ttk.Label(zoom_control_frame, text="100%")
+        self.zoom_label.pack(side=tk.LEFT, padx=10)
+
+        # Canvas with scrollbars for image
+        canvas_frame = ttk.Frame(display_frame)
+        canvas_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
+
+        # Scrollbars
+        h_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
+        v_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
+
+        # Canvas
+        self.edit_image_canvas = tk.Canvas(canvas_frame, width=600, height=400,
+                                           xscrollcommand=h_scrollbar.set,
+                                           yscrollcommand=v_scrollbar.set)
+
+        h_scrollbar.config(command=self.edit_image_canvas.xview)
+        v_scrollbar.config(command=self.edit_image_canvas.yview)
+
+        # Grid layout
+        self.edit_image_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        h_scrollbar.grid(row=1, column=0, sticky=(tk.W, tk.E))
+        v_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+
+        canvas_frame.columnconfigure(0, weight=1)
+        canvas_frame.rowconfigure(0, weight=1)
+
+        display_frame.columnconfigure(0, weight=1)
+        display_frame.rowconfigure(1, weight=1)
 
         # Modification input frame
         modify_frame = ttk.LabelFrame(parent, text="Make Changes to the Edit", padding="5")
@@ -525,6 +559,8 @@ class BirdClassifierGUI:
         self.original_edit_image = None
         self.current_edited_image = None
         self.current_edited_photo = None
+        self.zoom_level = 1.0
+        self.canvas_image_id = None
 
     def browse_folder(self):
         folder = filedialog.askdirectory()
@@ -583,12 +619,57 @@ class BirdClassifierGUI:
                     self.edit_progress_var.set(msg['value'])
                     self.edit_status_label.config(text=msg['text'])
                 elif msg['type'] == 'edit_image':
-                    self.edit_image_label.configure(image=msg['image'])
-                    self.current_edited_photo = msg['image']
+                    # Reset zoom and display the image
+                    self.zoom_level = 1.0
+                    self.update_edited_image_display()
         except Empty:
             pass
         finally:
             self.root.after(100, self.update_gui)
+
+    def zoom_in(self):
+        """Zoom in on the edited image"""
+        if self.current_edited_image:
+            self.zoom_level *= 1.25
+            self.update_edited_image_display()
+
+    def zoom_out(self):
+        """Zoom out on the edited image"""
+        if self.current_edited_image:
+            self.zoom_level /= 1.25
+            self.update_edited_image_display()
+
+    def zoom_reset(self):
+        """Reset zoom to 100%"""
+        if self.current_edited_image:
+            self.zoom_level = 1.0
+            self.update_edited_image_display()
+
+    def update_edited_image_display(self):
+        """Update the canvas with the zoomed image"""
+        if not self.current_edited_image:
+            return
+
+        # Calculate new size based on zoom
+        width, height = self.current_edited_image.size
+        new_width = int(width * self.zoom_level)
+        new_height = int(height * self.zoom_level)
+
+        # Resize image for display
+        display_image = self.current_edited_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        self.current_edited_photo = ImageTk.PhotoImage(display_image)
+
+        # Update canvas
+        if self.canvas_image_id:
+            self.edit_image_canvas.delete(self.canvas_image_id)
+
+        self.canvas_image_id = self.edit_image_canvas.create_image(0, 0, anchor=tk.NW, image=self.current_edited_photo)
+
+        # Update scroll region
+        self.edit_image_canvas.config(scrollregion=self.edit_image_canvas.bbox(tk.ALL))
+
+        # Update zoom label
+        self.zoom_label.config(text=f"{int(self.zoom_level * 100)}%")
 
     def browse_edit_image(self):
         """Browse for image to edit"""
@@ -750,12 +831,8 @@ Create a SQUARE edited version of this image following these requirements."""
             # Store the edited image
             self.current_edited_image = edited_image
 
-            # Display the edited image
-            display_image = edited_image.copy()
-            display_image.thumbnail((600, 600))
-            photo = ImageTk.PhotoImage(display_image)
-
-            self.queue.put({'type': 'edit_image', 'image': photo})
+            # Notify that image is ready for display
+            self.queue.put({'type': 'edit_image'})
             self.queue.put({'type': 'edit_progress', 'value': 100, 'text': 'Editing complete!'})
 
             # Enable save button
