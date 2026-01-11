@@ -144,7 +144,7 @@ def process_folder(input_folder, api_key, location=None):
         return
 
     # Create output directory
-    output_dir = input_dir / '0000-bird-folders'
+    output_dir = input_dir / f'0000-{input_dir.name}'
     output_dir.mkdir(exist_ok=True)
 
     # Get list of images (skip macOS metadata files starting with ._ )

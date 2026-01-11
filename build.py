@@ -43,7 +43,7 @@ Instructions:
 5. Click 'Start Classification'
 6. Wait for the process to complete
 
-The classified photos will be organized in a '0000-bird-folders' directory inside your selected folder.
+The classified photos will be organized in a '0000-<folder-name>' directory inside your selected folder.
 
 Note: The API key will be saved automatically after the first use.
 """)
