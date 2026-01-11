@@ -627,6 +627,33 @@ class BirdClassifierGUI:
         finally:
             self.root.after(100, self.update_gui)
 
+    def reset_editing_context(self):
+        """Reset all editing context when a new image is selected"""
+        # Clear all stored images
+        self.original_edit_image = None
+        self.current_edited_image = None
+        self.current_edited_photo = None
+        self._last_api_text_response = None
+
+        # Reset zoom
+        self.zoom_level = 1.0
+        self.zoom_label.config(text="100%")
+
+        # Clear canvas
+        if self.canvas_image_id:
+            self.edit_image_canvas.delete(self.canvas_image_id)
+            self.canvas_image_id = None
+
+        # Reset progress
+        self.edit_progress_var.set(0)
+        self.edit_status_label.config(text="Ready")
+
+        # Disable save button
+        self.save_edit_button.state(['disabled'])
+
+        # Clear modification text
+        self.edit_modify_text.set("")
+
     def zoom_in(self):
         """Zoom in on the edited image"""
         if self.current_edited_image:
@@ -679,6 +706,8 @@ class BirdClassifierGUI:
         )
         if file_path:
             self.edit_image_path.set(file_path)
+            # Reset editing context when new image is selected
+            self.reset_editing_context()
 
     def apply_ai_edit(self):
         """Apply AI-guided editing to the image"""
