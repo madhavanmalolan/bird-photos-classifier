@@ -31,6 +31,33 @@ def save_api_key(api_key):
     with open('api_key.json', 'w') as f:
         json.dump({'api_key': api_key}, f)
 
+# Progress tracking functions
+def load_progress(progress_file):
+    """Load progress from a JSON file"""
+    try:
+        if os.path.exists(progress_file):
+            with open(progress_file, 'r') as f:
+                return json.load(f)
+        return {'processed': []}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {'processed': []}
+
+def save_progress(progress_file, processed_items):
+    """Save progress to a JSON file"""
+    try:
+        with open(progress_file, 'w') as f:
+            json.dump({'processed': processed_items}, f, indent=2)
+    except Exception as e:
+        print(f"Error saving progress: {e}")
+
+def clear_progress(progress_file):
+    """Clear progress file"""
+    try:
+        if os.path.exists(progress_file):
+            os.remove(progress_file)
+    except Exception as e:
+        print(f"Error clearing progress: {e}")
+
 def encode_image(image_path):
     """Encode image to base64 string."""
     with open(image_path, 'rb') as image_file:
@@ -421,6 +448,15 @@ class BirdClassifierGUI:
                 elif msg['type'] == 'error':
                     messagebox.showerror("Error", msg['text'])
                     self.start_button.state(['!disabled'])
+                elif msg['type'] == 'messagebox_info':
+                    messagebox.showinfo(msg.get('title', 'Info'), msg['text'])
+                elif msg['type'] == 'messagebox_error':
+                    messagebox.showerror(msg.get('title', 'Error'), msg['text'])
+                elif msg['type'] == 'dist_progress':
+                    self.dist_progress_var.set(msg['value'])
+                    self.dist_status_label.config(text=msg['text'])
+                elif msg['type'] == 'dist_log':
+                    self.dist_log(msg['text'])
         except Empty:
             pass
         finally:
@@ -479,25 +515,35 @@ class BirdClassifierGUI:
             # Create output directory
             output_dir = self.input_dir / f'0000-{self.input_dir.name}'
             output_dir.mkdir(exist_ok=True)
-            
+
+            # Progress file path
+            progress_file = output_dir / '.distribute-into-folders.progress'
+
+            # Load progress
+            progress_data = load_progress(str(progress_file))
+            processed_images = set(progress_data.get('processed', []))
+
             # Get all image files (skip macOS metadata files)
             images = [f for f in output_dir.glob('*') if f.suffix.lower() in ['.jpg', '.jpeg', '.png'] and not f.name.startswith('._') and not f.name.startswith('.')]
             total_images = len(images)
-            
+
             if total_images == 0:
                 self.queue.put({
                     'type': 'error',
                     'text': "No images found to distribute"
                 })
                 return
-            
+
             # Get API key for bird info
             api_key = self.api_key_var.get().strip()
-            
+
             # Track unique birds for progress
             unique_birds = set()
-            
+
             for i, image_path in enumerate(images, 1):
+                # Skip if already processed
+                if image_path.name in processed_images:
+                    continue
                 # Update progress
                 progress = (i / total_images) * 100
                 self.queue.put({
@@ -539,22 +585,33 @@ class BirdClassifierGUI:
                             'value': progress,
                             'text': f"Created info file for {bird_name}"
                         })
-            
+
+                # Mark image as processed and save progress
+                processed_images.add(image_path.name)
+                save_progress(str(progress_file), list(processed_images))
+
+            # Clear progress file after successful completion
+            clear_progress(str(progress_file))
+
             # Update final status with summary
             self.queue.put({
                 'type': 'progress',
                 'value': 100,
                 'text': f"Distribution completed! Organized {len(unique_birds)} unique bird species."
             })
-            
-            messagebox.showinfo("Success", f"Photos have been distributed into folders!\nOrganized {len(unique_birds)} unique bird species.")
-            
+
+            # Use queue to show messagebox from main thread
+            self.queue.put({
+                'type': 'messagebox_info',
+                'title': 'Success',
+                'text': f"Photos have been distributed into folders!\nOrganized {len(unique_birds)} unique bird species."
+            })
+
         except Exception as e:
             self.queue.put({
                 'type': 'error',
                 'text': f"Error during distribution: {str(e)}"
             })
-            messagebox.showerror("Error", f"Error during distribution: {str(e)}")
         finally:
             # Re-enable the distribute button
             self.distribute_button.state(['!disabled'])
@@ -564,29 +621,39 @@ class BirdClassifierGUI:
         try:
             # Store input directory for later use
             self.input_dir = Path(input_folder)
-            
+
             if not self.input_dir.exists():
                 self.queue.put({
                     'type': 'error',
                     'text': f"Input folder '{input_folder}' does not exist"
                 })
                 return
-            
+
             # Create output directory
             output_dir = self.input_dir / f'0000-{self.input_dir.name}'
             output_dir.mkdir(exist_ok=True)
-            
+
+            # Progress file path
+            progress_file = self.input_dir / '.classifier.progress'
+
+            # Load progress
+            progress_data = load_progress(str(progress_file))
+            processed_images = set(progress_data.get('processed', []))
+
             # Get list of images (skip macOS metadata files starting with ._ )
             images = [f for f in self.input_dir.glob('*') if f.suffix.lower() in ['.jpg', '.jpeg', '.png'] and not f.name.startswith('._') and not f.name.startswith('.')]
             total_images = len(images)
             loaded_birds = ["None"]
-            
+
             # Get user's probable location
             user_location = self.location_var.get().strip()
             if user_location:
                 user_location = f"Probably {user_location}"
-            
+
             for i, image_path in enumerate(images, 1):
+                # Skip if already processed
+                if image_path.name in processed_images:
+                    continue
                 # Update progress
                 progress = (i / total_images) * 100
                 self.queue.put({
@@ -623,7 +690,7 @@ class BirdClassifierGUI:
                     new_filename = get_new_filename(image_path, bird_name, is_blurred)
                     # Create the file in the output directory
                     new_path = output_dir / new_filename
-                    
+
                     # Copy the file to the output directory with new name
                     shutil.copy2(str(image_path), str(new_path))
                     loaded_birds.append(bird_name)
@@ -633,26 +700,37 @@ class BirdClassifierGUI:
                     new_path = output_dir / new_filename
                     shutil.copy2(str(image_path), str(new_path))
                     loaded_birds.append("Unidentified")
-            
+
+                # Mark image as processed and save progress
+                processed_images.add(image_path.name)
+                save_progress(str(progress_file), list(processed_images))
+
+            # Clear progress file after successful completion
+            clear_progress(str(progress_file))
+
             # Update final status
             self.queue.put({
                 'type': 'progress',
                 'value': 100,
                 'text': "Classification completed! Click 'Distribute into Folders' to organize the photos."
             })
-            
+
             # Enable the distribute button
             self.distribute_button.state(['!disabled'])
-            
-            messagebox.showinfo("Success", "Classification completed! Click 'Distribute into Folders' to organize the photos.")
-            
+
+            # Use queue to show messagebox from main thread
+            self.queue.put({
+                'type': 'messagebox_info',
+                'title': 'Success',
+                'text': "Classification completed! Click 'Distribute into Folders' to organize the photos."
+            })
+
         except Exception as e:
             self.queue.put({
                 'type': 'error',
                 'text': f"Error: {str(e)}"
             })
             print(f"Error during classification: {str(e)}")
-            #messagebox.showerror("Error", f"Error during classification: {str(e)}")
         finally:
             self.start_button.state(['!disabled'])
             # Always enable the distribute button
@@ -746,7 +824,7 @@ Response:"""
                 return response_text
             return None
         except Exception as e:
-            self.dist_log(f"Error matching bird name '{bird_name}': {str(e)}")
+            self.queue.put({'type': 'dist_log', 'text': f"Error matching bird name '{bird_name}': {str(e)}"})
             return None
 
     def distribute_to_organized_folder(self, input_folder, output_folder, api_key):
@@ -758,6 +836,13 @@ Response:"""
             # Create output folder if it doesn't exist
             output_path.mkdir(exist_ok=True)
 
+            # Progress file path
+            progress_file = output_path / '.alphabetic-distributor.progress'
+
+            # Load progress
+            progress_data = load_progress(str(progress_file))
+            processed_folders = set(progress_data.get('processed', []))
+
             # Get the input folder name (for prepending)
             input_folder_name = input_path.name
 
@@ -765,13 +850,13 @@ Response:"""
             bird_folders = [f for f in input_path.iterdir() if f.is_dir() and not f.name.startswith('.')]
 
             if not bird_folders:
-                self.dist_log("No bird folders found in input directory")
-                self.dist_status_label.config(text="No folders to process")
+                self.queue.put({'type': 'dist_log', 'text': "No bird folders found in input directory"})
+                self.queue.put({'type': 'dist_progress', 'value': 0, 'text': "No folders to process"})
                 self.dist_start_button.state(['!disabled'])
                 return
 
             total_folders = len(bird_folders)
-            self.dist_log(f"Found {total_folders} bird folders to process")
+            self.queue.put({'type': 'dist_log', 'text': f"Found {total_folders} bird folders to process"})
 
             # Build a map of existing birds in the output folder
             existing_birds_map = {}  # bird_name -> path
@@ -781,22 +866,26 @@ Response:"""
                         if bird_folder.is_dir():
                             existing_birds_map[bird_folder.name] = bird_folder
 
-            self.dist_log(f"Found {len(existing_birds_map)} existing bird folders in output")
+            self.queue.put({'type': 'dist_log', 'text': f"Found {len(existing_birds_map)} existing bird folders in output"})
 
             # Process each bird folder
             for i, bird_folder in enumerate(bird_folders, 1):
                 bird_name = bird_folder.name
+
+                # Skip if already processed
+                if bird_name in processed_folders:
+                    continue
+
                 progress = (i / total_folders) * 100
 
-                self.dist_progress_var.set(progress)
-                self.dist_status_label.config(text=f"Processing {i}/{total_folders}: {bird_name}")
-                self.dist_log(f"\n[{i}/{total_folders}] Processing: {bird_name}")
+                self.queue.put({'type': 'dist_progress', 'value': progress, 'text': f"Processing {i}/{total_folders}: {bird_name}"})
+                self.queue.put({'type': 'dist_log', 'text': f"\n[{i}/{total_folders}] Processing: {bird_name}"})
 
                 # Get all images in this bird folder
                 images = [f for f in bird_folder.glob('*') if f.suffix.lower() in ['.jpg', '.jpeg', '.png'] and not f.name.startswith('._')]
 
                 if not images:
-                    self.dist_log(f"  No images found in {bird_name}, skipping")
+                    self.queue.put({'type': 'dist_log', 'text': f"  No images found in {bird_name}, skipping"})
                     continue
 
                 # Try to match with existing birds
@@ -805,7 +894,7 @@ Response:"""
                 if matched_bird:
                     # Use existing folder
                     target_folder = existing_birds_map[matched_bird]
-                    self.dist_log(f"  Matched to existing bird: {matched_bird}")
+                    self.queue.put({'type': 'dist_log', 'text': f"  Matched to existing bird: {matched_bird}"})
                 else:
                     # Create new folder
                     # Determine letter folder (0A, 0B, etc.)
@@ -816,13 +905,13 @@ Response:"""
                     # Create letter folder if needed
                     if not letter_folder_path.exists():
                         letter_folder_path.mkdir()
-                        self.dist_log(f"  Created new letter folder: {letter_folder_name}")
+                        self.queue.put({'type': 'dist_log', 'text': f"  Created new letter folder: {letter_folder_name}"})
 
                     # Create bird folder
                     target_folder = letter_folder_path / bird_name
                     target_folder.mkdir(exist_ok=True)
                     existing_birds_map[bird_name] = target_folder
-                    self.dist_log(f"  Created new bird folder: {bird_name} in {letter_folder_name}")
+                    self.queue.put({'type': 'dist_log', 'text': f"  Created new bird folder: {bird_name} in {letter_folder_name}"})
 
                 # Copy all images with prepended folder name
                 copied_count = 0
@@ -835,20 +924,36 @@ Response:"""
                     shutil.copy2(str(image), str(target_path))
                     copied_count += 1
 
-                self.dist_log(f"  Copied {copied_count} images to {target_folder}")
+                self.queue.put({'type': 'dist_log', 'text': f"  Copied {copied_count} images to {target_folder}"})
+
+                # Mark folder as processed and save progress
+                processed_folders.add(bird_name)
+                save_progress(str(progress_file), list(processed_folders))
+
+            # Clear progress file after successful completion
+            clear_progress(str(progress_file))
 
             # Final status
-            self.dist_progress_var.set(100)
-            self.dist_status_label.config(text="Distribution completed!")
-            self.dist_log(f"\n✓ Distribution completed! Processed {total_folders} bird folders.")
+            self.queue.put({'type': 'dist_progress', 'value': 100, 'text': "Distribution completed!"})
+            self.queue.put({'type': 'dist_log', 'text': f"\n✓ Distribution completed! Processed {total_folders} bird folders."})
 
-            messagebox.showinfo("Success", f"Distribution completed!\nProcessed {total_folders} bird folders.")
+            # Use queue to show messagebox from main thread
+            self.queue.put({
+                'type': 'messagebox_info',
+                'title': 'Success',
+                'text': f"Distribution completed!\nProcessed {total_folders} bird folders."
+            })
 
         except Exception as e:
             error_msg = f"Error during distribution: {str(e)}"
-            self.dist_log(f"\n✗ {error_msg}")
-            self.dist_status_label.config(text="Error occurred")
-            messagebox.showerror("Error", error_msg)
+            self.queue.put({'type': 'dist_log', 'text': f"\n✗ {error_msg}"})
+            self.queue.put({'type': 'dist_progress', 'value': 0, 'text': "Error occurred"})
+            # Use queue to show messagebox from main thread
+            self.queue.put({
+                'type': 'messagebox_error',
+                'title': 'Error',
+                'text': error_msg
+            })
         finally:
             self.dist_start_button.state(['!disabled'])
 
