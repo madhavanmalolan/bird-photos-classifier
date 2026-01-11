@@ -288,6 +288,9 @@ class BirdClassifierGUI:
         # Store the input directory path
         self.input_dir = None
 
+        # Start GUI update loop
+        self.update_gui()
+
     def setup_classifier_tab(self, parent):
         """Setup the Classifier tab content"""
         # Folder selection
@@ -432,7 +435,6 @@ class BirdClassifierGUI:
         """Add a message to the distributor log"""
         self.dist_log_text.insert(tk.END, message + "\n")
         self.dist_log_text.see(tk.END)
-        self.dist_log_text.update()
 
     def update_gui(self):
         """Update GUI elements from the queue"""
@@ -478,14 +480,11 @@ class BirdClassifierGUI:
         self.start_button.state(['disabled'])
         self.progress_var.set(0)
         self.status_label.config(text="Starting classification...")
-        
+
         # Start processing in a separate thread
         thread = threading.Thread(target=self.process_photos, args=(folder, api_key))
         thread.daemon = True
         thread.start()
-        
-        # Start GUI updates
-        self.update_gui()
     
     def distribute_photos(self):
         self.input_dir = Path(self.folder_path.get())
@@ -500,14 +499,11 @@ class BirdClassifierGUI:
         
         # Disable the distribute button while processing
         self.distribute_button.state(['disabled'])
-        
+
         # Start processing in a separate thread
         thread = threading.Thread(target=self._distribute_photos_thread)
         thread.daemon = True
         thread.start()
-        
-        # Start GUI updates
-        self.update_gui()
     
     def _distribute_photos_thread(self):
         """Thread function for distributing photos."""
@@ -541,11 +537,18 @@ class BirdClassifierGUI:
             unique_birds = set()
 
             for i, image_path in enumerate(images, 1):
+                # Update progress (including skipped items)
+                progress = (i / total_images) * 100
+
                 # Skip if already processed
                 if image_path.name in processed_images:
+                    self.queue.put({
+                        'type': 'progress',
+                        'value': progress,
+                        'text': f"Skipping already distributed {i}/{total_images}: {image_path.name}"
+                    })
                     continue
-                # Update progress
-                progress = (i / total_images) * 100
+
                 self.queue.put({
                     'type': 'progress',
                     'value': progress,
@@ -651,17 +654,24 @@ class BirdClassifierGUI:
                 user_location = f"Probably {user_location}"
 
             for i, image_path in enumerate(images, 1):
+                # Update progress (including skipped items)
+                progress = (i / total_images) * 100
+
                 # Skip if already processed
                 if image_path.name in processed_images:
+                    self.queue.put({
+                        'type': 'progress',
+                        'value': progress,
+                        'text': f"Skipping already processed {i}/{total_images}: {image_path.name}"
+                    })
                     continue
-                # Update progress
-                progress = (i / total_images) * 100
+
                 self.queue.put({
                     'type': 'progress',
                     'value': progress,
                     'text': f"Processing image {i} of {total_images}: {image_path.name}"
                 })
-                
+
                 # Get location from EXIF data or use user's input
                 location = get_location_from_exif(image_path)
                 if not location and user_location:
@@ -871,12 +881,13 @@ Response:"""
             # Process each bird folder
             for i, bird_folder in enumerate(bird_folders, 1):
                 bird_name = bird_folder.name
+                progress = (i / total_folders) * 100
 
                 # Skip if already processed
                 if bird_name in processed_folders:
+                    self.queue.put({'type': 'dist_progress', 'value': progress, 'text': f"Skipping already processed {i}/{total_folders}: {bird_name}"})
+                    self.queue.put({'type': 'dist_log', 'text': f"\n[{i}/{total_folders}] Skipping (already processed): {bird_name}"})
                     continue
-
-                progress = (i / total_folders) * 100
 
                 self.queue.put({'type': 'dist_progress', 'value': progress, 'text': f"Processing {i}/{total_folders}: {bird_name}"})
                 self.queue.put({'type': 'dist_log', 'text': f"\n[{i}/{total_folders}] Processing: {bird_name}"})
