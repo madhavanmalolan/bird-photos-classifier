@@ -135,7 +135,7 @@ def identify_bird(image_path, api_key, loaded_birds, location):
         print(f"Error processing {image_path}: {str(e)}")
         return False, None, False
 
-def process_folder(input_folder, api_key, location=None):
+def process_folder(input_folder, api_key, location=None, skip_review=False, classify_only=False, distribute_only=False):
     """Process all images in the input folder."""
     input_dir = Path(input_folder)
 
@@ -144,7 +144,32 @@ def process_folder(input_folder, api_key, location=None):
         return
 
     # Create output directory
-    output_dir = input_dir / f'0000-{input_dir.name}'
+    # Extract folder number from directory name (e.g., 0241D3300 -> 0241)
+    folder_name = input_dir.name
+    folder_number = folder_name.split('D3300')[0] if 'D3300' in folder_name.upper() else folder_name
+    output_dir = input_dir / f'{folder_number} Birds'
+
+    # If distribute-only mode, skip to distribution
+    if distribute_only:
+        if not output_dir.exists():
+            print(f"Error: Output directory '{output_dir}' does not exist")
+            print("Run classification first without --distribute-only flag")
+            return
+
+        print("\n" + "=" * 60)
+        print("DISTRIBUTE-ONLY MODE")
+        print("=" * 60)
+        print(f"Distributing photos from: {output_dir}")
+        print()
+
+        # Manual review prompt (unless skipped)
+        if not skip_review:
+            manual_review_prompt(output_dir)
+
+        print("\nDistributing photos into folders...")
+        distribute_photos(output_dir, api_key)
+        return
+
     output_dir.mkdir(exist_ok=True)
 
     # Get list of images (skip macOS metadata files starting with ._ )
@@ -185,8 +210,171 @@ def process_folder(input_folder, api_key, location=None):
         print(status)
 
     print(f"\n✓ Classification completed! Files saved to: {output_dir}")
+
+    # Verify photo counts and cleanup originals
+    verify_and_cleanup(input_dir, output_dir)
+
+    # Stop here if classify-only mode
+    if classify_only:
+        print("\n" + "=" * 60)
+        print("CLASSIFY-ONLY MODE")
+        print("=" * 60)
+        print("Classification complete. Distribution skipped.")
+        print(f"Photos saved to: {output_dir}")
+        print()
+        print("To distribute photos later, run:")
+        print(f"  python3 classify_cli.py {input_folder} --distribute-only")
+        print("=" * 60)
+        return
+
+    # Manual review prompt (unless skipped)
+    if not skip_review:
+        manual_review_prompt(output_dir)
+
     print("\nDistributing photos into folders...")
     distribute_photos(output_dir, api_key)
+
+def manual_review_prompt(output_dir):
+    """
+    Prompt user to manually review all photos before distribution.
+    User should delete poor quality/blurred photos and verify bird names.
+    """
+    print("\n" + "=" * 60)
+    print("MANUAL REVIEW REQUIRED")
+    print("=" * 60)
+    print()
+    print(f"Please review all photos in: {output_dir}")
+    print()
+    print("Tasks to complete:")
+    print("  1. Delete photos that are:")
+    print("     - Poor quality")
+    print("     - Blurred or out of focus")
+    print("     - Not needed")
+    print()
+    print("  2. Verify bird names are correct:")
+    print("     - Rename files if bird is misidentified")
+    print("     - Keep format: YYYY_XXXX Bird Name.JPG")
+    print()
+    print("  3. When finished, return here and press ENTER to continue")
+    print()
+    print("=" * 60)
+
+    input("Press ENTER when manual review is complete...")
+
+    print()
+    print("✓ Manual review completed")
+    print()
+
+
+def verify_and_cleanup(input_dir, output_dir):
+    """
+    Verify that photos were classified and cleanup originals.
+    Deletes only the parent photos that have corresponding classified versions in output directory.
+    Keeps any unclassified photos in the parent directory.
+    """
+    print("\n" + "=" * 60)
+    print("VERIFICATION: Checking photo counts")
+    print("=" * 60)
+
+    # Get photos in parent directory (originals)
+    parent_photos = [f for f in input_dir.glob('*')
+                    if f.suffix.lower() in ['.jpg', '.jpeg', '.png']
+                    and not f.name.startswith('._')
+                    and not f.name.startswith('.')
+                    and f.is_file()]
+    parent_count = len(parent_photos)
+
+    # Get photos in output directory (classified)
+    output_photos = [f for f in output_dir.glob('*')
+                    if f.suffix.lower() in ['.jpg', '.jpeg', '.png']
+                    and not f.name.startswith('._')
+                    and not f.name.startswith('.')
+                    and f.is_file()]
+    output_count = len(output_photos)
+
+    print(f"Photos in parent directory: {parent_count}")
+    print(f"Photos in output directory: {output_count}")
+    print()
+
+    if output_count == 0:
+        print("No classified photos found. Original photos kept.")
+        print("=" * 60)
+        print()
+        return
+
+    # Extract original filenames from classified photos
+    # Classified format: "0241_0001 Black Kite.JPG"
+    # Original format: "0241_0001.JPG"
+    classified_originals = set()
+    for output_photo in output_photos:
+        # Extract the base filename (before the bird name)
+        # Pattern: YYYY_XXXX Bird Name.ext -> YYYY_XXXX.ext
+        filename = output_photo.stem  # Get filename without extension
+        parts = filename.split()
+        if len(parts) >= 1:
+            base_name = parts[0]  # Get "0241_0001" part
+            original_name = f"{base_name}{output_photo.suffix}"
+            classified_originals.add(original_name)
+
+    # Find which parent photos have been classified
+    to_delete = []
+    to_keep = []
+    for photo in parent_photos:
+        if photo.name in classified_originals:
+            to_delete.append(photo)
+        else:
+            to_keep.append(photo)
+
+    print(f"Successfully classified: {len(to_delete)} photos")
+    print(f"Not classified (will keep): {len(to_keep)} photos")
+    print()
+
+    if len(to_delete) == 0:
+        print("No photos to delete (none were classified)")
+        print("=" * 60)
+        print()
+        return
+
+    # Show summary
+    if parent_count == output_count:
+        print("✓ All photos were successfully classified!")
+    else:
+        print("⚠️  Some photos were not classified and will remain in parent directory")
+        if to_keep:
+            print("\nPhotos that will be kept:")
+            for photo in to_keep[:5]:  # Show first 5
+                print(f"  - {photo.name}")
+            if len(to_keep) > 5:
+                print(f"  ... and {len(to_keep) - 5} more")
+
+    print()
+
+    # Ask for confirmation before deleting
+    response = input(f"Delete {len(to_delete)} classified photos from parent directory? (y/n): ")
+
+    if response.lower() == 'y':
+        print("\nDeleting classified photos from parent directory...")
+        deleted_count = 0
+
+        for photo in to_delete:
+            try:
+                os.remove(photo)
+                print(f"  Deleted: {photo.name}")
+                deleted_count += 1
+            except Exception as e:
+                print(f"  Error deleting {photo.name}: {e}")
+
+        print()
+        print(f"✓ Deleted {deleted_count} classified photos")
+        if to_keep:
+            print(f"✓ Kept {len(to_keep)} unclassified photos in parent directory")
+        print(f"  Classified photos remain in: {output_dir}")
+    else:
+        print("\nAll original photos kept in parent directory")
+
+    print("=" * 60)
+    print()
+
 
 def distribute_photos(output_dir, api_key):
     """Distribute photos into folders based on their names."""
@@ -243,6 +431,12 @@ Examples:
     parser.add_argument('folder', help='Path to folder containing bird photos')
     parser.add_argument('--api-key', help='Google Gemini API key (will be saved for future use)')
     parser.add_argument('--location', help='Probable location where photos were taken')
+    parser.add_argument('--skip-review', action='store_true',
+                       help='Skip manual review prompt (auto-proceed to distribution)')
+    parser.add_argument('--classify-only', action='store_true',
+                       help='Only classify photos, skip distribution (for manual review later)')
+    parser.add_argument('--distribute-only', action='store_true',
+                       help='Skip classification, only distribute already-classified photos')
 
     args = parser.parse_args()
 
@@ -268,7 +462,7 @@ Examples:
         print("API key saved for future use\n")
 
     # Process the folder
-    process_folder(args.folder, api_key, args.location)
+    process_folder(args.folder, api_key, args.location, args.skip_review, args.classify_only, args.distribute_only)
 
 if __name__ == "__main__":
     main()
