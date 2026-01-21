@@ -407,14 +407,6 @@ def distribute_photos(output_dir, api_key):
             # Move the file to the bird folder
             shutil.move(str(image_path), str(bird_folder / image_path.name))
 
-            # Create info.txt file if it doesn't exist
-            info_file = bird_folder / "info.txt"
-            if not info_file.exists():
-                print(f"  Creating info file for {bird_name}...")
-                info_text = get_bird_info(bird_name, api_key)
-                if info_text:
-                    create_bird_info_file(bird_folder, bird_name, info_text)
-
     print(f"\n✓ Distribution completed! Organized {len(unique_birds)} unique bird species.")
 
 def main():
