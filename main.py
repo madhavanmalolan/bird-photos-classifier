@@ -477,16 +477,35 @@ class BirdClassifierGUI:
         ttk.Entry(image_frame, textvariable=self.edit_image_path, width=50).pack(side=tk.LEFT, padx=5)
         ttk.Button(image_frame, text="Browse", command=self.browse_edit_image).pack(side=tk.LEFT, padx=5)
 
+        # Watermark selection (optional)
+        watermark_frame = ttk.Frame(parent)
+        watermark_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(watermark_frame, text="Watermark (optional):").pack(side=tk.LEFT, padx=5)
+        self.edit_watermark_path = tk.StringVar()
+        ttk.Entry(watermark_frame, textvariable=self.edit_watermark_path, width=50).pack(side=tk.LEFT, padx=5)
+        ttk.Button(watermark_frame, text="Browse", command=self.browse_watermark_image).pack(side=tk.LEFT, padx=5)
+        ttk.Button(watermark_frame, text="Clear", command=lambda: self.edit_watermark_path.set("")).pack(side=tk.LEFT, padx=5)
+
+        # Aspect ratio selection
+        aspect_frame = ttk.LabelFrame(parent, text="Aspect Ratio", padding="5")
+        aspect_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        self.aspect_ratio_var = tk.StringVar(value="square")
+        ttk.Radiobutton(aspect_frame, text="Square (1:1)", variable=self.aspect_ratio_var, value="square").pack(side=tk.LEFT, padx=10)
+        ttk.Radiobutton(aspect_frame, text="Vertical (16x9)", variable=self.aspect_ratio_var, value="vertical").pack(side=tk.LEFT, padx=10)
+        ttk.Radiobutton(aspect_frame, text="Horizontal (9x16)", variable=self.aspect_ratio_var, value="horizontal").pack(side=tk.LEFT, padx=10)
+
         # Edit button
         edit_button_frame = ttk.Frame(parent)
-        edit_button_frame.grid(row=1, column=0, columnspan=2, pady=10)
+        edit_button_frame.grid(row=3, column=0, columnspan=2, pady=10)
 
         self.edit_button = ttk.Button(edit_button_frame, text="Apply AI Editing", command=self.apply_ai_edit)
         self.edit_button.pack(side=tk.LEFT, padx=5)
 
         # Progress frame
         edit_progress_frame = ttk.LabelFrame(parent, text="Progress", padding="5")
-        edit_progress_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        edit_progress_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         self.edit_progress_var = tk.DoubleVar()
         self.edit_progress_bar = ttk.Progressbar(edit_progress_frame, variable=self.edit_progress_var, maximum=100)
@@ -497,7 +516,7 @@ class BirdClassifierGUI:
 
         # Image display frame with zoom controls
         display_frame = ttk.LabelFrame(parent, text="Edited Image", padding="5")
-        display_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        display_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
 
         # Zoom controls
         zoom_control_frame = ttk.Frame(display_frame)
@@ -538,7 +557,7 @@ class BirdClassifierGUI:
 
         # Modification input frame
         modify_frame = ttk.LabelFrame(parent, text="Make Changes to the Edit", padding="5")
-        modify_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        modify_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         self.edit_modify_text = tk.StringVar()
         ttk.Entry(modify_frame, textvariable=self.edit_modify_text, width=60).pack(side=tk.LEFT, padx=5, pady=5)
@@ -546,14 +565,14 @@ class BirdClassifierGUI:
 
         # Save button
         save_button_frame = ttk.Frame(parent)
-        save_button_frame.grid(row=5, column=0, columnspan=2, pady=10)
+        save_button_frame.grid(row=7, column=0, columnspan=2, pady=10)
 
         self.save_edit_button = ttk.Button(save_button_frame, text="Save Edited Image", command=self.save_edited_image, state='disabled')
         self.save_edit_button.pack(side=tk.LEFT, padx=5)
 
         # Configure grid weights for editing tab
         parent.columnconfigure(1, weight=1)
-        parent.rowconfigure(3, weight=1)
+        parent.rowconfigure(5, weight=1)
 
         # Store original and edited images
         self.original_edit_image = None
@@ -709,6 +728,15 @@ class BirdClassifierGUI:
             # Reset editing context when new image is selected
             self.reset_editing_context()
 
+    def browse_watermark_image(self):
+        """Browse for an optional watermark image."""
+        file_path = filedialog.askopenfilename(
+            title="Select Watermark Image",
+            filetypes=[("Image files", "*.jpg *.jpeg *.png"), ("All files", "*.*")]
+        )
+        if file_path:
+            self.edit_watermark_path.set(file_path)
+
     def apply_ai_edit(self):
         """Apply AI-guided editing to the image"""
         image_path = self.edit_image_path.get()
@@ -791,8 +819,12 @@ class BirdClassifierGUI:
                 self.original_edit_image.save(tmp.name, format='JPEG', quality=95)
                 temp_path = tmp.name
 
-            # Check if watermark exists
-            watermark_path = Path('watermark.jpg')
+            # Resolve watermark: user-selected first, then default watermark.jpg
+            user_watermark = self.edit_watermark_path.get().strip()
+            if user_watermark:
+                watermark_path = Path(user_watermark)
+            else:
+                watermark_path = Path('watermark.jpg')
             watermark_exists = watermark_path.exists()
 
             # Create prompt for AI
@@ -802,31 +834,39 @@ class BirdClassifierGUI:
 - Remove the background from the watermark, make it transparent
 - The watermark should be subtle and not distract from the bird""" if watermark_exists else ""
 
+            aspect_ratio = self.aspect_ratio_var.get()
+            aspect_specs = {
+                'square': ('SQUARE', '1:1 aspect ratio'),
+                'vertical': ('VERTICAL', '9:16 aspect ratio (portrait, taller than wide)'),
+                'horizontal': ('HORIZONTAL', '16:9 aspect ratio (landscape, wider than tall)'),
+            }
+            aspect_label, aspect_desc = aspect_specs[aspect_ratio]
+
             if modification:
                 prompt = f"""Edit this bird photograph with the following changes: {modification}
 
 CRITICAL REQUIREMENTS:
 - DO NOT change the bird itself or the surroundings
 - You CAN: zoom in/out, pan (move the frame), crop, adjust lighting, colors, contrast, and sharpness
-- Make the output a SQUARE image (1:1 aspect ratio) - VERY IMPORTANT
+- Make the output a {aspect_label} image ({aspect_desc}) - VERY IMPORTANT
 - Zoom and pan to frame the bird for the best professional composition
 - Apply professional color grading like a National Geographic photographer
 - The bird and background must remain unchanged - only enhance through zoom, pan, and lighting adjustments{watermark_instruction}
 
-Create a SQUARE edited version of this image following these requirements."""
+Create a {aspect_label} edited version of this image following these requirements."""
             else:
                 prompt = f"""Edit this bird photograph to create a professional National Geographic-style image.
 
 CRITICAL REQUIREMENTS:
 - DO NOT change the bird itself or the surroundings
 - You CAN: zoom in/out, pan (move the frame), crop, adjust lighting, colors, contrast, and sharpness
-- Make the output a SQUARE image (1:1 aspect ratio) - VERY IMPORTANT
+- Make the output a {aspect_label} image ({aspect_desc}) - VERY IMPORTANT
 - Zoom and pan to frame the bird for the best professional composition
 - Fix color profile and lighting for professional look
 - Enhance sharpness and contrast
 - The bird and background must remain unchanged - only enhance through zoom, pan, and lighting adjustments{watermark_instruction}
 
-Create a SQUARE edited version of this image following these requirements."""
+Create a {aspect_label} edited version of this image following these requirements."""
 
             self.queue.put({'type': 'edit_progress', 'value': 40, 'text': 'AI is processing the image...'})
 
@@ -852,10 +892,10 @@ Create a SQUARE edited version of this image following these requirements."""
                     error_msg += " The API may not support image editing yet, or it may have filtered the request."
                 raise Exception(error_msg)
 
-            self.queue.put({'type': 'edit_progress', 'value': 90, 'text': 'Finalizing and ensuring square output...'})
+            self.queue.put({'type': 'edit_progress', 'value': 90, 'text': f'Finalizing and ensuring {aspect_ratio} output...'})
 
-            # Ensure the image is square
-            edited_image = self._ensure_square_image(edited_image)
+            # Ensure the image matches the requested aspect ratio
+            edited_image = self._ensure_aspect_ratio(edited_image, aspect_ratio)
 
             # Store the edited image
             self.current_edited_image = edited_image
@@ -939,34 +979,37 @@ Create a SQUARE edited version of this image following these requirements."""
             traceback.print_exc()
             return None
 
-    def _ensure_square_image(self, image):
-        """Ensure the image is perfectly square"""
+    def _ensure_aspect_ratio(self, image, aspect_ratio):
+        """Center-crop the image to the requested aspect ratio."""
         width, height = image.size
-        print(f"Image dimensions: {width}x{height}")
+        print(f"Image dimensions: {width}x{height}, target: {aspect_ratio}")
 
-        if width == height:
-            print("Image is already square")
+        ratios = {
+            'square': (1, 1),
+            'vertical': (9, 16),
+            'horizontal': (16, 9),
+        }
+        target_w, target_h = ratios[aspect_ratio]
+        target = target_w / target_h
+        current = width / height
+
+        if abs(current - target) < 1e-3:
+            print(f"Image already matches {aspect_ratio} ratio")
             return image
 
-        # Make it square by cropping to the smaller dimension (center crop)
-        size = min(width, height)
-
-        if width > height:
-            # Crop horizontally
-            left = (width - size) // 2
-            top = 0
-            right = left + size
-            bottom = size
+        if current > target:
+            # Too wide — crop width
+            new_width = int(round(height * target))
+            left = (width - new_width) // 2
+            box = (left, 0, left + new_width, height)
         else:
-            # Crop vertically
-            left = 0
-            top = (height - size) // 2
-            right = size
-            bottom = top + size
+            # Too tall — crop height
+            new_height = int(round(width / target))
+            top = (height - new_height) // 2
+            box = (0, top, width, top + new_height)
 
-        print(f"Cropping to square: {size}x{size}")
-        cropped = image.crop((left, top, right, bottom))
-        return cropped
+        print(f"Cropping to {aspect_ratio}: {box[2]-box[0]}x{box[3]-box[1]}")
+        return image.crop(box)
 
     def start_classification(self):
         # Save API key
