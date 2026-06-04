@@ -1,13 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from PyInstaller.utils.hooks import collect_data_files
+
 block_cipher = None
+tkinterdnd2_datas = collect_data_files('tkinterdnd2')
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('.env', '.')],
-    hiddenimports=['PIL._tkinter_finder'],
+    datas=[('.env', '.')] + tkinterdnd2_datas,
+    hiddenimports=['PIL._tkinter_finder', 'tkinterdnd2'],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -41,4 +44,4 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='icon.ico' if os.name == 'nt' else 'icon.icns'
-) 
+)

@@ -7,7 +7,7 @@ import re
 import requests
 import base64
 from io import BytesIO
-from PIL import Image, ImageTk, ImageEnhance, ImageFilter, ImageDraw
+from PIL import Image, ImageTk, ImageEnhance, ImageFilter, ImageDraw, ImageFont
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from dotenv import load_dotenv
@@ -15,6 +15,12 @@ import threading
 from queue import Queue, Empty
 import json
 import tempfile
+
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+except ImportError:
+    DND_FILES = None
+    TkinterDnD = None
 
 # Load environment variables from .env file
 load_dotenv()
@@ -468,18 +474,53 @@ class BirdClassifierGUI:
 
     def setup_editing_tab(self, parent):
         """Setup the Editing tab content"""
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=1)
+
+        scroll_canvas = tk.Canvas(parent, highlightthickness=0)
+        scroll_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+
+        scroll_bar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=scroll_canvas.yview)
+        scroll_bar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        scroll_canvas.configure(yscrollcommand=scroll_bar.set)
+
+        content = ttk.Frame(scroll_canvas)
+        content_window = scroll_canvas.create_window((0, 0), window=content, anchor=tk.NW)
+
+        def update_scroll_region(event=None):
+            scroll_canvas.configure(scrollregion=scroll_canvas.bbox(tk.ALL))
+
+        def fit_content_width(event):
+            scroll_canvas.itemconfigure(content_window, width=event.width)
+
+        content.bind("<Configure>", update_scroll_region)
+        scroll_canvas.bind("<Configure>", fit_content_width)
+        scroll_canvas.bind("<Enter>", lambda event: self.bind_editing_scroll(scroll_canvas))
+        scroll_canvas.bind("<Leave>", lambda event: self.unbind_editing_scroll())
+        content.bind("<Enter>", lambda event: self.bind_editing_scroll(scroll_canvas))
+        content.bind("<Leave>", lambda event: self.unbind_editing_scroll())
+
         # Image selection frame
-        image_frame = ttk.Frame(parent)
+        image_frame = ttk.Frame(content)
         image_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         ttk.Label(image_frame, text="Select Image:").pack(side=tk.LEFT, padx=5)
         self.edit_image_path = tk.StringVar()
-        ttk.Entry(image_frame, textvariable=self.edit_image_path, width=50).pack(side=tk.LEFT, padx=5)
+        self.edit_image_entry = ttk.Entry(image_frame, textvariable=self.edit_image_path, width=50)
+        self.edit_image_entry.pack(side=tk.LEFT, padx=5)
         ttk.Button(image_frame, text="Browse", command=self.browse_edit_image).pack(side=tk.LEFT, padx=5)
 
+        # Bird name input
+        bird_name_frame = ttk.Frame(content)
+        bird_name_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        ttk.Label(bird_name_frame, text="Bird Name (optional):").pack(side=tk.LEFT, padx=5)
+        self.edit_bird_name = tk.StringVar()
+        ttk.Entry(bird_name_frame, textvariable=self.edit_bird_name, width=50).pack(side=tk.LEFT, padx=5)
+
         # Watermark selection (optional)
-        watermark_frame = ttk.Frame(parent)
-        watermark_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        watermark_frame = ttk.Frame(content)
+        watermark_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         ttk.Label(watermark_frame, text="Watermark (optional):").pack(side=tk.LEFT, padx=5)
         self.edit_watermark_path = tk.StringVar()
@@ -488,24 +529,24 @@ class BirdClassifierGUI:
         ttk.Button(watermark_frame, text="Clear", command=lambda: self.edit_watermark_path.set("")).pack(side=tk.LEFT, padx=5)
 
         # Aspect ratio selection
-        aspect_frame = ttk.LabelFrame(parent, text="Aspect Ratio", padding="5")
-        aspect_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        aspect_frame = ttk.LabelFrame(content, text="Aspect Ratio", padding="5")
+        aspect_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         self.aspect_ratio_var = tk.StringVar(value="square")
         ttk.Radiobutton(aspect_frame, text="Square (1:1)", variable=self.aspect_ratio_var, value="square").pack(side=tk.LEFT, padx=10)
-        ttk.Radiobutton(aspect_frame, text="Vertical (16x9)", variable=self.aspect_ratio_var, value="vertical").pack(side=tk.LEFT, padx=10)
-        ttk.Radiobutton(aspect_frame, text="Horizontal (9x16)", variable=self.aspect_ratio_var, value="horizontal").pack(side=tk.LEFT, padx=10)
+        ttk.Radiobutton(aspect_frame, text="Vertical (9x16)", variable=self.aspect_ratio_var, value="vertical").pack(side=tk.LEFT, padx=10)
+        ttk.Radiobutton(aspect_frame, text="Horizontal (16x9)", variable=self.aspect_ratio_var, value="horizontal").pack(side=tk.LEFT, padx=10)
 
         # Edit button
-        edit_button_frame = ttk.Frame(parent)
-        edit_button_frame.grid(row=3, column=0, columnspan=2, pady=10)
+        edit_button_frame = ttk.Frame(content)
+        edit_button_frame.grid(row=4, column=0, columnspan=2, pady=10)
 
         self.edit_button = ttk.Button(edit_button_frame, text="Apply AI Editing", command=self.apply_ai_edit)
         self.edit_button.pack(side=tk.LEFT, padx=5)
 
         # Progress frame
-        edit_progress_frame = ttk.LabelFrame(parent, text="Progress", padding="5")
-        edit_progress_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        edit_progress_frame = ttk.LabelFrame(content, text="Progress", padding="5")
+        edit_progress_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         self.edit_progress_var = tk.DoubleVar()
         self.edit_progress_bar = ttk.Progressbar(edit_progress_frame, variable=self.edit_progress_var, maximum=100)
@@ -514,72 +555,59 @@ class BirdClassifierGUI:
         self.edit_status_label = ttk.Label(edit_progress_frame, text="Ready")
         self.edit_status_label.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
 
-        # Image display frame with zoom controls
-        display_frame = ttk.LabelFrame(parent, text="Edited Image", padding="5")
-        display_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        # Fixed-size preview. Double-click opens the full-screen zoomable viewer.
+        display_frame = ttk.LabelFrame(content, text="Edited Preview", padding="5")
+        display_frame.grid(row=6, column=0, columnspan=2, pady=5)
 
-        # Zoom controls
-        zoom_control_frame = ttk.Frame(display_frame)
-        zoom_control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
-
-        ttk.Button(zoom_control_frame, text="-", width=3, command=self.zoom_out).pack(side=tk.LEFT, padx=2)
-        ttk.Button(zoom_control_frame, text="+", width=3, command=self.zoom_in).pack(side=tk.LEFT, padx=2)
-        ttk.Button(zoom_control_frame, text="Reset", command=self.zoom_reset).pack(side=tk.LEFT, padx=2)
-        self.zoom_label = ttk.Label(zoom_control_frame, text="100%")
-        self.zoom_label.pack(side=tk.LEFT, padx=10)
-
-        # Canvas with scrollbars for image
-        canvas_frame = ttk.Frame(display_frame)
-        canvas_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
-
-        # Scrollbars
-        h_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
-        v_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
-
-        # Canvas
-        self.edit_image_canvas = tk.Canvas(canvas_frame, width=600, height=400,
-                                           xscrollcommand=h_scrollbar.set,
-                                           yscrollcommand=v_scrollbar.set)
-
-        h_scrollbar.config(command=self.edit_image_canvas.xview)
-        v_scrollbar.config(command=self.edit_image_canvas.yview)
-
-        # Grid layout
-        self.edit_image_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        h_scrollbar.grid(row=1, column=0, sticky=(tk.W, tk.E))
-        v_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
-
-        canvas_frame.columnconfigure(0, weight=1)
-        canvas_frame.rowconfigure(0, weight=1)
-
-        display_frame.columnconfigure(0, weight=1)
-        display_frame.rowconfigure(1, weight=1)
+        self.preview_width = 240
+        self.preview_height = 240
+        self.edit_preview_canvas = tk.Canvas(
+            display_frame,
+            width=self.preview_width,
+            height=self.preview_height,
+            bg="#222222",
+            highlightthickness=0,
+        )
+        self.edit_preview_canvas.grid(row=0, column=0, padx=5, pady=5)
+        self.edit_preview_canvas.create_text(
+            self.preview_width // 2,
+            self.preview_height // 2,
+            text="Edited image preview",
+            fill="#dddddd",
+        )
+        self.edit_preview_canvas.bind("<Double-Button-1>", self.open_fullscreen_preview)
 
         # Modification input frame
-        modify_frame = ttk.LabelFrame(parent, text="Make Changes to the Edit", padding="5")
-        modify_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        modify_frame = ttk.LabelFrame(content, text="Make Changes to the Edit", padding="5")
+        modify_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         self.edit_modify_text = tk.StringVar()
         ttk.Entry(modify_frame, textvariable=self.edit_modify_text, width=60).pack(side=tk.LEFT, padx=5, pady=5)
         ttk.Button(modify_frame, text="Apply", command=self.apply_edit_modification).pack(side=tk.LEFT, padx=5)
 
         # Save button
-        save_button_frame = ttk.Frame(parent)
-        save_button_frame.grid(row=7, column=0, columnspan=2, pady=10)
+        save_button_frame = ttk.Frame(content)
+        save_button_frame.grid(row=8, column=0, columnspan=2, pady=10)
 
         self.save_edit_button = ttk.Button(save_button_frame, text="Save Edited Image", command=self.save_edited_image, state='disabled')
         self.save_edit_button.pack(side=tk.LEFT, padx=5)
 
-        # Configure grid weights for editing tab
-        parent.columnconfigure(1, weight=1)
-        parent.rowconfigure(5, weight=1)
+        # Configure grid weights for editing content
+        content.columnconfigure(1, weight=1)
+        content.rowconfigure(6, weight=1)
 
         # Store original and edited images
         self.original_edit_image = None
         self.current_edited_image = None
         self.current_edited_photo = None
+        self.current_preview_photo = None
         self.zoom_level = 1.0
-        self.canvas_image_id = None
+        self.fullscreen_canvas = None
+        self.fullscreen_photo = None
+        self.fullscreen_image_id = None
+        self.editing_scroll_canvas = None
+
+        self.setup_edit_drag_and_drop(parent, content)
 
     def browse_folder(self):
         folder = filedialog.askdirectory()
@@ -638,9 +666,12 @@ class BirdClassifierGUI:
                     self.edit_progress_var.set(msg['value'])
                     self.edit_status_label.config(text=msg['text'])
                 elif msg['type'] == 'edit_image':
-                    # Reset zoom and display the image
-                    self.zoom_level = 1.0
                     self.update_edited_image_display()
+                elif msg['type'] == 'edit_button_ready':
+                    self.edit_button.state(['!disabled'])
+                elif msg['type'] == 'edit_complete':
+                    self.save_edit_button.state(['!disabled'])
+                    self.edit_button.state(['!disabled'])
         except Empty:
             pass
         finally:
@@ -652,16 +683,19 @@ class BirdClassifierGUI:
         self.original_edit_image = None
         self.current_edited_image = None
         self.current_edited_photo = None
+        self.current_preview_photo = None
         self._last_api_text_response = None
 
         # Reset zoom
         self.zoom_level = 1.0
-        self.zoom_label.config(text="100%")
 
-        # Clear canvas
-        if self.canvas_image_id:
-            self.edit_image_canvas.delete(self.canvas_image_id)
-            self.canvas_image_id = None
+        self.edit_preview_canvas.delete(tk.ALL)
+        self.edit_preview_canvas.create_text(
+            self.preview_width // 2,
+            self.preview_height // 2,
+            text="Edited image preview",
+            fill="#dddddd",
+        )
 
         # Reset progress
         self.edit_progress_var.set(0)
@@ -677,62 +711,206 @@ class BirdClassifierGUI:
         """Zoom in on the edited image"""
         if self.current_edited_image:
             self.zoom_level *= 1.25
-            self.update_edited_image_display()
+            self.update_fullscreen_image_display()
 
     def zoom_out(self):
         """Zoom out on the edited image"""
         if self.current_edited_image:
             self.zoom_level /= 1.25
-            self.update_edited_image_display()
+            self.update_fullscreen_image_display()
 
     def zoom_reset(self):
         """Reset zoom to 100%"""
         if self.current_edited_image:
             self.zoom_level = 1.0
-            self.update_edited_image_display()
+            self.update_fullscreen_image_display()
 
     def update_edited_image_display(self):
-        """Update the canvas with the zoomed image"""
+        """Update the fixed in-tab preview."""
         if not self.current_edited_image:
             return
 
-        # Calculate new size based on zoom
         width, height = self.current_edited_image.size
-        new_width = int(width * self.zoom_level)
-        new_height = int(height * self.zoom_level)
+        scale = min(self.preview_width / width, self.preview_height / height)
+        preview_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+        display_image = self.current_edited_image.resize(preview_size, Image.Resampling.LANCZOS)
+        self.current_preview_photo = ImageTk.PhotoImage(display_image)
 
-        # Resize image for display
+        self.edit_preview_canvas.delete(tk.ALL)
+        x = (self.preview_width - preview_size[0]) // 2
+        y = (self.preview_height - preview_size[1]) // 2
+        self.edit_preview_canvas.create_image(x, y, anchor=tk.NW, image=self.current_preview_photo)
+        self.edit_preview_canvas.create_text(
+            self.preview_width // 2,
+            self.preview_height - 16,
+            text="Double-click for full screen",
+            fill="#ffffff",
+        )
+
+    def update_fullscreen_image_display(self):
+        """Update the full-screen viewer image at the current zoom level."""
+        if not self.current_edited_image or not self.fullscreen_canvas:
+            return
+
+        width, height = self.current_edited_image.size
+        new_width = max(1, int(width * self.zoom_level))
+        new_height = max(1, int(height * self.zoom_level))
         display_image = self.current_edited_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        self.current_edited_photo = ImageTk.PhotoImage(display_image)
+        self.fullscreen_photo = ImageTk.PhotoImage(display_image)
 
-        # Update canvas
-        if self.canvas_image_id:
-            self.edit_image_canvas.delete(self.canvas_image_id)
+        if self.fullscreen_image_id:
+            self.fullscreen_canvas.delete(self.fullscreen_image_id)
 
-        self.canvas_image_id = self.edit_image_canvas.create_image(0, 0, anchor=tk.NW, image=self.current_edited_photo)
+        self.fullscreen_image_id = self.fullscreen_canvas.create_image(0, 0, anchor=tk.NW, image=self.fullscreen_photo)
+        self.fullscreen_canvas.config(scrollregion=self.fullscreen_canvas.bbox(tk.ALL))
 
-        # Update scroll region
-        self.edit_image_canvas.config(scrollregion=self.edit_image_canvas.bbox(tk.ALL))
+    def open_fullscreen_preview(self, event=None):
+        """Open the edited image in a full-screen scrollable, zoomable window."""
+        if not self.current_edited_image:
+            return
 
-        # Update zoom label
-        self.zoom_label.config(text=f"{int(self.zoom_level * 100)}%")
+        viewer = tk.Toplevel(self.root)
+        viewer.title("Edited Image Preview")
+        viewer.attributes("-fullscreen", True)
+        viewer.bind("<Escape>", lambda event: viewer.destroy())
+
+        toolbar = ttk.Frame(viewer)
+        toolbar.pack(side=tk.TOP, fill=tk.X)
+        ttk.Button(toolbar, text="Close", command=viewer.destroy).pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Button(toolbar, text="-", width=3, command=self.zoom_out).pack(side=tk.LEFT, padx=2, pady=5)
+        ttk.Button(toolbar, text="+", width=3, command=self.zoom_in).pack(side=tk.LEFT, padx=2, pady=5)
+        ttk.Button(toolbar, text="Reset", command=self.zoom_reset).pack(side=tk.LEFT, padx=5, pady=5)
+        ttk.Label(toolbar, text="Two-finger scroll pans. Pinch/Control-scroll zooms. Esc closes.").pack(side=tk.LEFT, padx=10)
+
+        canvas_frame = ttk.Frame(viewer)
+        canvas_frame.pack(fill=tk.BOTH, expand=True)
+
+        h_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
+        v_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
+        self.fullscreen_canvas = tk.Canvas(
+            canvas_frame,
+            bg="#111111",
+            xscrollcommand=h_scrollbar.set,
+            yscrollcommand=v_scrollbar.set,
+        )
+        h_scrollbar.config(command=self.fullscreen_canvas.xview)
+        v_scrollbar.config(command=self.fullscreen_canvas.yview)
+
+        self.fullscreen_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        h_scrollbar.grid(row=1, column=0, sticky=(tk.W, tk.E))
+        v_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        canvas_frame.columnconfigure(0, weight=1)
+        canvas_frame.rowconfigure(0, weight=1)
+
+        self.fullscreen_canvas.bind("<MouseWheel>", self.on_fullscreen_mousewheel)
+        self.fullscreen_canvas.bind("<Shift-MouseWheel>", self.on_fullscreen_shift_mousewheel)
+        self.fullscreen_canvas.bind("<Control-MouseWheel>", self.on_fullscreen_zoom_wheel)
+        self.fullscreen_canvas.bind("<Command-MouseWheel>", self.on_fullscreen_zoom_wheel)
+        self.fullscreen_canvas.bind("<Button-4>", lambda event: self.fullscreen_canvas.yview_scroll(-3, "units"))
+        self.fullscreen_canvas.bind("<Button-5>", lambda event: self.fullscreen_canvas.yview_scroll(3, "units"))
+        try:
+            self.fullscreen_canvas.bind("<Magnify>", self.on_fullscreen_magnify)
+        except tk.TclError:
+            pass
+
+        self.zoom_level = 1.0
+        self.fullscreen_image_id = None
+        self.update_fullscreen_image_display()
+        self.fullscreen_canvas.focus_set()
+
+        def cleanup(event=None):
+            self.fullscreen_canvas = None
+            self.fullscreen_photo = None
+            self.fullscreen_image_id = None
+
+        viewer.bind("<Destroy>", cleanup)
+
+    def on_fullscreen_mousewheel(self, event):
+        if self.fullscreen_canvas:
+            self.fullscreen_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def on_fullscreen_shift_mousewheel(self, event):
+        if self.fullscreen_canvas:
+            self.fullscreen_canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def on_fullscreen_zoom_wheel(self, event):
+        if event.delta > 0:
+            self.zoom_in()
+        else:
+            self.zoom_out()
+        return "break"
+
+    def on_fullscreen_magnify(self, event):
+        self.zoom_level *= max(0.2, 1.0 + event.delta)
+        self.update_fullscreen_image_display()
+        return "break"
+
+    def bind_editing_scroll(self, canvas):
+        """Route mouse-wheel gestures to the Editing tab scroller."""
+        self.editing_scroll_canvas = canvas
+        self.root.bind_all("<MouseWheel>", self.on_editing_scroll_mousewheel)
+        self.root.bind_all("<Button-4>", self.on_editing_scroll_up)
+        self.root.bind_all("<Button-5>", self.on_editing_scroll_down)
+
+    def unbind_editing_scroll(self):
+        self.root.unbind_all("<MouseWheel>")
+        self.root.unbind_all("<Button-4>")
+        self.root.unbind_all("<Button-5>")
+        self.editing_scroll_canvas = None
+
+    def on_editing_scroll_mousewheel(self, event):
+        if getattr(self, 'editing_scroll_canvas', None):
+            self.editing_scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def on_editing_scroll_up(self, event):
+        if getattr(self, 'editing_scroll_canvas', None):
+            self.editing_scroll_canvas.yview_scroll(-3, "units")
+
+    def on_editing_scroll_down(self, event):
+        if getattr(self, 'editing_scroll_canvas', None):
+            self.editing_scroll_canvas.yview_scroll(3, "units")
+
+    def setup_edit_drag_and_drop(self, parent, content):
+        """Enable OS file drops on the Editing tab when tkinterdnd2 is available."""
+        if DND_FILES is None or not hasattr(parent, "drop_target_register"):
+            return
+
+        for widget in (parent, content, self.edit_image_entry, self.edit_preview_canvas):
+            widget.drop_target_register(DND_FILES)
+            widget.dnd_bind("<<Drop>>", self.on_edit_image_drop)
+
+    def on_edit_image_drop(self, event):
+        paths = self.root.tk.splitlist(event.data)
+        for path in paths:
+            if self.set_edit_image_path(path):
+                return "break"
+        messagebox.showerror("Error", "Drop a JPG, JPEG, or PNG image file")
+        return "break"
+
+    def set_edit_image_path(self, file_path):
+        """Select an image for editing and reset derived state."""
+        path = Path(file_path)
+        if not path.is_file() or path.suffix.lower() not in {'.jpg', '.jpeg', '.png'}:
+            return False
+
+        self.edit_image_path.set(str(path))
+        self.reset_editing_context()
+        return True
 
     def browse_edit_image(self):
         """Browse for image to edit"""
         file_path = filedialog.askopenfilename(
             title="Select Image",
-            filetypes=[("Image files", "*.jpg *.jpeg *.png"), ("All files", "*.*")]
+            filetypes=[("Image files", "*.jpg *.jpeg *.png *.JPG *.JPEG *.PNG"), ("All files", "*.*")]
         )
         if file_path:
-            self.edit_image_path.set(file_path)
-            # Reset editing context when new image is selected
-            self.reset_editing_context()
+            self.set_edit_image_path(file_path)
 
     def browse_watermark_image(self):
         """Browse for an optional watermark image."""
         file_path = filedialog.askopenfilename(
             title="Select Watermark Image",
-            filetypes=[("Image files", "*.jpg *.jpeg *.png"), ("All files", "*.*")]
+            filetypes=[("Image files", "*.jpg *.jpeg *.png *.JPG *.JPEG *.PNG"), ("All files", "*.*")]
         )
         if file_path:
             self.edit_watermark_path.set(file_path)
@@ -755,7 +933,17 @@ class BirdClassifierGUI:
         self.edit_status_label.config(text="Starting AI editing...")
 
         # Start editing in a separate thread
-        thread = threading.Thread(target=self._perform_ai_edit, args=(image_path, api_key, None))
+        thread = threading.Thread(
+            target=self._perform_ai_edit,
+            args=(
+                image_path,
+                api_key,
+                None,
+                self.aspect_ratio_var.get(),
+                self.edit_bird_name.get().strip(),
+                self.edit_watermark_path.get().strip(),
+            ),
+        )
         thread.daemon = True
         thread.start()
 
@@ -780,7 +968,17 @@ class BirdClassifierGUI:
         self.edit_status_label.config(text="Applying modifications...")
 
         # Start editing in a separate thread
-        thread = threading.Thread(target=self._perform_ai_edit, args=(self.edit_image_path.get(), api_key, modification))
+        thread = threading.Thread(
+            target=self._perform_ai_edit,
+            args=(
+                self.edit_image_path.get(),
+                api_key,
+                modification,
+                self.aspect_ratio_var.get(),
+                self.edit_bird_name.get().strip(),
+                self.edit_watermark_path.get().strip(),
+            ),
+        )
         thread.daemon = True
         thread.start()
 
@@ -804,8 +1002,9 @@ class BirdClassifierGUI:
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save image: {str(e)}")
 
-    def _perform_ai_edit(self, image_path, api_key, modification=None):
+    def _perform_ai_edit(self, image_path, api_key, modification=None, aspect_ratio='square', bird_name='', user_watermark=''):
         """Perform AI-guided editing in background thread"""
+        temp_path = None
         try:
             # Load original image if not already loaded
             if not self.original_edit_image:
@@ -820,7 +1019,6 @@ class BirdClassifierGUI:
                 temp_path = tmp.name
 
             # Resolve watermark: user-selected first, then default watermark.jpg
-            user_watermark = self.edit_watermark_path.get().strip()
             if user_watermark:
                 watermark_path = Path(user_watermark)
             else:
@@ -834,7 +1032,6 @@ class BirdClassifierGUI:
 - Remove the background from the watermark, make it transparent
 - The watermark should be subtle and not distract from the bird""" if watermark_exists else ""
 
-            aspect_ratio = self.aspect_ratio_var.get()
             aspect_specs = {
                 'square': ('SQUARE', '1:1 aspect ratio'),
                 'vertical': ('VERTICAL', '9:16 aspect ratio (portrait, taller than wide)'),
@@ -876,9 +1073,6 @@ Create a {aspect_label} edited version of this image following these requirement
             else:
                 response = call_gemini_image_api(api_key, prompt, temp_path)
 
-            # Clean up temp file
-            os.remove(temp_path)
-
             self.queue.put({'type': 'edit_progress', 'value': 70, 'text': 'Extracting edited image...'})
 
             # Extract the image from response
@@ -896,6 +1090,7 @@ Create a {aspect_label} edited version of this image following these requirement
 
             # Ensure the image matches the requested aspect ratio
             edited_image = self._ensure_aspect_ratio(edited_image, aspect_ratio)
+            edited_image = self._add_bird_name_label(edited_image, bird_name)
 
             # Store the edited image
             self.current_edited_image = edited_image
@@ -903,9 +1098,7 @@ Create a {aspect_label} edited version of this image following these requirement
             # Notify that image is ready for display
             self.queue.put({'type': 'edit_image'})
             self.queue.put({'type': 'edit_progress', 'value': 100, 'text': 'Editing complete!'})
-
-            # Enable save button
-            self.save_edit_button.state(['!disabled'])
+            self.queue.put({'type': 'edit_complete'})
 
         except Exception as e:
             self.queue.put({
@@ -915,7 +1108,77 @@ Create a {aspect_label} edited version of this image following these requirement
             })
             print(f"Error during AI editing: {str(e)}")
         finally:
-            self.edit_button.state(['!disabled'])
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+            self.queue.put({'type': 'edit_button_ready'})
+
+    def _add_bird_name_label(self, image, bird_name):
+        """Draw the optional bird name at the top with capped Noto Sans text height."""
+        if not bird_name:
+            return image
+
+        output = image.convert("RGBA")
+        draw = ImageDraw.Draw(output)
+        width, height = output.size
+        max_text_height = max(1, int(height * 0.10))
+        horizontal_padding = max(12, int(width * 0.04))
+        max_text_width = width - (horizontal_padding * 2)
+
+        font = self._load_noto_sans_font(max_text_height)
+        while font.size > 8:
+            bbox = draw.textbbox((0, 0), bird_name, font=font)
+            text_width = bbox[2] - bbox[0]
+            text_height = bbox[3] - bbox[1]
+            if text_width <= max_text_width and text_height <= max_text_height:
+                break
+            font = self._load_noto_sans_font(font.size - 1)
+
+        bbox = draw.textbbox((0, 0), bird_name, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        x = (width - text_width) // 2
+        y = max(4, int(height * 0.025))
+
+        sample_box = (
+            max(0, x - 8),
+            max(0, y - 8),
+            min(width, x + text_width + 8),
+            min(height, y + text_height + 8),
+        )
+        crop = output.crop(sample_box).convert("L")
+        avg_luminance = sum(crop.getdata()) / max(1, crop.width * crop.height)
+        fill = "black" if avg_luminance > 150 else "white"
+        stroke_fill = "white" if fill == "black" else "black"
+
+        draw.text(
+            (x, y - bbox[1]),
+            bird_name,
+            font=font,
+            fill=fill,
+            stroke_width=max(1, font.size // 18),
+            stroke_fill=stroke_fill,
+        )
+        return output.convert(image.mode if image.mode in ("RGB", "RGBA") else "RGB")
+
+    def _load_noto_sans_font(self, size):
+        """Load Noto Sans when available, with a safe fallback."""
+        font_paths = [
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/Library/Fonts/NotoSans-Regular.ttf",
+            "C:/Windows/Fonts/NotoSans-Regular.ttf",
+        ]
+        for font_path in font_paths:
+            if os.path.exists(font_path):
+                return ImageFont.truetype(font_path, size=size)
+
+        try:
+            return ImageFont.truetype("NotoSans-Regular.ttf", size=size)
+        except OSError:
+            return ImageFont.load_default(size=size)
 
     def _extract_image_from_response(self, response):
         """Extract image data from Gemini API response"""
@@ -1517,7 +1780,7 @@ Response:"""
 
 def main():
     print("Starting application. This might take upto 2 minutes.")
-    root = tk.Tk()
+    root = TkinterDnD.Tk() if TkinterDnD else tk.Tk()
     app = BirdClassifierGUI(root)
     root.mainloop()
 
