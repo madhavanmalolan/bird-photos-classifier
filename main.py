@@ -15,6 +15,8 @@ import threading
 from queue import Queue, Empty
 import json
 import tempfile
+import glob
+import subprocess
 
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
@@ -1110,14 +1112,16 @@ class BirdClassifierGUI:
             widget = getattr(widget, "master", None)
         return None
 
-    def scroll_widget(self, widget, amount, horizontal=False):
+    def scroll_widget(self, widget, delta, horizontal=False):
         if not widget:
             return
 
-        if horizontal and hasattr(widget, "xview_scroll"):
-            widget.xview_scroll(amount, "units")
+        if isinstance(widget, tk.Canvas):
+            self.smooth_scroll_canvas(widget, delta, horizontal=horizontal)
+        elif horizontal and hasattr(widget, "xview_scroll"):
+            widget.xview_scroll(int(delta / 120), "units")
         elif not horizontal and hasattr(widget, "yview_scroll"):
-            widget.yview_scroll(amount, "units")
+            widget.yview_scroll(int(delta / 120), "units")
 
     def on_app_mousewheel(self, event):
         if event.state & 0x0004:
@@ -1127,36 +1131,36 @@ class BirdClassifierGUI:
 
         horizontal = self.is_horizontal_scroll_event(event)
         widget = self.find_scrollable_widget(event.widget, horizontal=horizontal)
-        self.scroll_widget(widget, int(-1 * (event.delta / 120)), horizontal=horizontal)
+        self.scroll_widget(widget, -event.delta, horizontal=horizontal)
 
     def on_app_shift_mousewheel(self, event):
         if isinstance(event.widget, tk.Text):
             return
 
         widget = self.find_scrollable_widget(event.widget, horizontal=True)
-        self.scroll_widget(widget, int(-1 * (event.delta / 120)), horizontal=True)
+        self.scroll_widget(widget, -event.delta, horizontal=True)
 
     def on_app_scroll_up(self, event):
         if isinstance(event.widget, tk.Text):
             return
 
         widget = self.find_scrollable_widget(event.widget)
-        self.scroll_widget(widget, -3)
+        self.scroll_widget(widget, -120)
 
     def on_app_scroll_down(self, event):
         if isinstance(event.widget, tk.Text):
             return
 
         widget = self.find_scrollable_widget(event.widget)
-        self.scroll_widget(widget, 3)
+        self.scroll_widget(widget, 120)
 
     def on_app_scroll_left(self, event):
         widget = self.find_scrollable_widget(event.widget, horizontal=True)
-        self.scroll_widget(widget, -3, horizontal=True)
+        self.scroll_widget(widget, -120, horizontal=True)
 
     def on_app_scroll_right(self, event):
         widget = self.find_scrollable_widget(event.widget, horizontal=True)
-        self.scroll_widget(widget, 3, horizontal=True)
+        self.scroll_widget(widget, 120, horizontal=True)
 
     def setup_edit_drag_and_drop(self, parent, content):
         """Enable OS file drops on the Editing tab when tkinterdnd2 is available."""
@@ -1468,20 +1472,47 @@ Create a {aspect_label} edited version of this exact image following these requi
 
     def _load_overlay_font(self, size):
         """Load Lexend Giga when available, with safe fallbacks."""
+        fc_match_path = self._font_path_from_fc_match("Lexend Giga")
+        if fc_match_path:
+            try:
+                return ImageFont.truetype(fc_match_path, size=size)
+            except OSError:
+                pass
+
         font_paths = [
             "/usr/share/fonts/truetype/lexend/LexendGiga-Regular.ttf",
             "/usr/share/fonts/truetype/lexend-giga/LexendGiga-Regular.ttf",
             "/usr/share/fonts/truetype/google-fonts/LexendGiga-Regular.ttf",
             "/Library/Fonts/LexendGiga-Regular.ttf",
+            "/Library/Fonts/LexendGiga-VariableFont_wght.ttf",
+            os.path.expanduser("~/Library/Fonts/LexendGiga-Regular.ttf"),
+            os.path.expanduser("~/Library/Fonts/LexendGiga-VariableFont_wght.ttf"),
             "C:/Windows/Fonts/LexendGiga-Regular.ttf",
             "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/Library/Fonts/NotoSans-Regular.ttf",
+            os.path.expanduser("~/Library/Fonts/NotoSans-Regular.ttf"),
             "C:/Windows/Fonts/NotoSans-Regular.ttf",
         ]
         for font_path in font_paths:
             if os.path.exists(font_path):
                 return ImageFont.truetype(font_path, size=size)
+
+        font_patterns = [
+            os.path.expanduser("~/Library/Fonts/*Lexend*Giga*.*"),
+            os.path.expanduser("~/Library/Fonts/*LexendGiga*.*"),
+            "/Library/Fonts/*Lexend*Giga*.*",
+            "/Library/Fonts/*LexendGiga*.*",
+            "/System/Library/Fonts/*Lexend*Giga*.*",
+        ]
+        for pattern in font_patterns:
+            for font_path in glob.glob(pattern):
+                if Path(font_path).suffix.lower() not in {'.ttf', '.otf', '.ttc'}:
+                    continue
+                try:
+                    return ImageFont.truetype(font_path, size=size)
+                except OSError:
+                    pass
 
         try:
             return ImageFont.truetype("LexendGiga-Regular.ttf", size=size)
@@ -1492,6 +1523,23 @@ Create a {aspect_label} edited version of this exact image following these requi
             return ImageFont.truetype("NotoSans-Regular.ttf", size=size)
         except OSError:
             return ImageFont.load_default(size=size)
+
+    def _font_path_from_fc_match(self, family_name):
+        """Resolve a font family to a file path when fontconfig is available."""
+        try:
+            result = subprocess.run(
+                ["fc-match", "-f", "%{file}", family_name],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return None
+
+        font_path = result.stdout.strip()
+        if font_path and os.path.exists(font_path) and "Lexend" in font_path:
+            return font_path
+        return None
 
     def _extract_image_from_response(self, response):
         """Extract image data from Gemini API response"""
