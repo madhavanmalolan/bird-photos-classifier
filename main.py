@@ -372,6 +372,7 @@ class BirdClassifierGUI:
         self.input_dir = None
 
         # Start GUI update loop
+        self.bind_app_scroll_events()
         self.update_gui()
 
     def setup_classifier_tab(self, parent):
@@ -512,51 +513,59 @@ class BirdClassifierGUI:
 
         content.bind("<Configure>", update_scroll_region)
         scroll_canvas.bind("<Configure>", fit_content_width)
-        scroll_canvas.bind("<Enter>", lambda event: self.bind_editing_scroll(scroll_canvas))
-        scroll_canvas.bind("<Leave>", lambda event: self.unbind_editing_scroll())
-        content.bind("<Enter>", lambda event: self.bind_editing_scroll(scroll_canvas))
-        content.bind("<Leave>", lambda event: self.unbind_editing_scroll())
+        content.columnconfigure(0, weight=0)
+        content.columnconfigure(1, weight=1)
+
+        left_column = ttk.Frame(content, padding=(0, 0, 10, 0))
+        left_column.grid(row=0, column=0, sticky=(tk.N, tk.W, tk.E))
+
+        right_column = ttk.Frame(content, padding=(10, 0, 0, 0))
+        right_column.grid(row=0, column=1, sticky=(tk.N, tk.EW))
+        right_column.columnconfigure(0, weight=1)
 
         # Image selection frame
-        image_frame = ttk.Frame(content)
-        image_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        image_frame = ttk.LabelFrame(left_column, text="Image", padding="5")
+        image_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
+        image_frame.columnconfigure(0, weight=1)
 
-        ttk.Label(image_frame, text="Select Image:").pack(side=tk.LEFT, padx=5)
+        ttk.Label(image_frame, text="Select Image").grid(row=0, column=0, sticky=tk.W, padx=5, pady=(0, 2))
         self.edit_image_path = tk.StringVar()
         self.edit_image_entry = ttk.Entry(image_frame, textvariable=self.edit_image_path, width=50)
-        self.edit_image_entry.pack(side=tk.LEFT, padx=5)
-        ttk.Button(image_frame, text="Browse", command=self.browse_edit_image).pack(side=tk.LEFT, padx=5)
+        self.edit_image_entry.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=2)
+        ttk.Button(image_frame, text="Browse", command=self.browse_edit_image).grid(row=1, column=1, padx=5, pady=2)
 
         # Bird name input
-        bird_name_frame = ttk.Frame(content)
-        bird_name_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        bird_name_frame = ttk.LabelFrame(left_column, text="Bird Name", padding="5")
+        bird_name_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
+        bird_name_frame.columnconfigure(0, weight=1)
 
         ttk.Label(bird_name_frame, text="Bird Name (optional):").pack(side=tk.LEFT, padx=5)
         self.edit_bird_name = tk.StringVar()
         ttk.Entry(bird_name_frame, textvariable=self.edit_bird_name, width=50).pack(side=tk.LEFT, padx=5)
 
         # Watermark selection (optional)
-        watermark_frame = ttk.Frame(content)
-        watermark_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        watermark_frame = ttk.LabelFrame(left_column, text="Watermark", padding="5")
+        watermark_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
+        watermark_frame.columnconfigure(0, weight=1)
 
-        ttk.Label(watermark_frame, text="Watermark (optional):").pack(side=tk.LEFT, padx=5)
+        ttk.Label(watermark_frame, text="Watermark (optional)").grid(row=0, column=0, sticky=tk.W, padx=5, pady=(0, 2))
         self.edit_watermark_path = tk.StringVar()
-        ttk.Entry(watermark_frame, textvariable=self.edit_watermark_path, width=50).pack(side=tk.LEFT, padx=5)
-        ttk.Button(watermark_frame, text="Browse", command=self.browse_watermark_image).pack(side=tk.LEFT, padx=5)
-        ttk.Button(watermark_frame, text="Clear", command=lambda: self.edit_watermark_path.set("")).pack(side=tk.LEFT, padx=5)
+        ttk.Entry(watermark_frame, textvariable=self.edit_watermark_path, width=50).grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=2)
+        ttk.Button(watermark_frame, text="Browse", command=self.browse_watermark_image).grid(row=1, column=1, padx=5, pady=2)
+        ttk.Button(watermark_frame, text="Clear", command=lambda: self.edit_watermark_path.set("")).grid(row=1, column=2, padx=5, pady=2)
 
         # Aspect ratio selection
-        aspect_frame = ttk.LabelFrame(content, text="Aspect Ratio", padding="5")
-        aspect_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        aspect_frame = ttk.LabelFrame(left_column, text="Aspect Ratio", padding="5")
+        aspect_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=5)
 
         self.aspect_ratio_var = tk.StringVar(value="square")
-        ttk.Radiobutton(aspect_frame, text="Square (1:1)", variable=self.aspect_ratio_var, value="square").pack(side=tk.LEFT, padx=10)
-        ttk.Radiobutton(aspect_frame, text="Vertical (9x16)", variable=self.aspect_ratio_var, value="vertical").pack(side=tk.LEFT, padx=10)
-        ttk.Radiobutton(aspect_frame, text="Horizontal (16x9)", variable=self.aspect_ratio_var, value="horizontal").pack(side=tk.LEFT, padx=10)
+        ttk.Radiobutton(aspect_frame, text="Square (1:1)", variable=self.aspect_ratio_var, value="square").grid(row=0, column=0, sticky=tk.W, padx=8, pady=2)
+        ttk.Radiobutton(aspect_frame, text="Vertical (9x16)", variable=self.aspect_ratio_var, value="vertical").grid(row=1, column=0, sticky=tk.W, padx=8, pady=2)
+        ttk.Radiobutton(aspect_frame, text="Horizontal (16x9)", variable=self.aspect_ratio_var, value="horizontal").grid(row=2, column=0, sticky=tk.W, padx=8, pady=2)
 
         # Edit options
-        options_frame = ttk.LabelFrame(content, text="Edit Options", padding="5")
-        options_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        options_frame = ttk.LabelFrame(left_column, text="Edit Options", padding="5")
+        options_frame.grid(row=4, column=0, sticky=(tk.W, tk.E), pady=5)
 
         self.fix_lighting_color_var = tk.BooleanVar(value=True)
         self.fix_blur_var = tk.BooleanVar(value=False)
@@ -567,46 +576,46 @@ class BirdClassifierGUI:
             options_frame,
             text="Fix lighting and color",
             variable=self.fix_lighting_color_var,
-        ).pack(side=tk.LEFT, padx=10)
+        ).grid(row=0, column=0, sticky=tk.W, padx=8, pady=2)
         ttk.Checkbutton(
             options_frame,
             text="Fix blur",
             variable=self.fix_blur_var,
-        ).pack(side=tk.LEFT, padx=10)
+        ).grid(row=1, column=0, sticky=tk.W, padx=8, pady=2)
         ttk.Checkbutton(
             options_frame,
             text="Focus on bird",
             variable=self.focus_on_bird_var,
-        ).pack(side=tk.LEFT, padx=10)
+        ).grid(row=2, column=0, sticky=tk.W, padx=8, pady=2)
         ttk.Checkbutton(
             options_frame,
             text="Add name",
             variable=self.add_bird_name_var,
-        ).pack(side=tk.LEFT, padx=10)
-        ttk.Label(options_frame, text="Text color:").pack(side=tk.LEFT, padx=(10, 2))
+        ).grid(row=3, column=0, sticky=tk.W, padx=8, pady=2)
+        ttk.Label(options_frame, text="Text color").grid(row=4, column=0, sticky=tk.W, padx=8, pady=(8, 2))
         ttk.Radiobutton(
             options_frame,
             text="White",
             variable=self.bird_name_text_color_var,
             value="white",
-        ).pack(side=tk.LEFT, padx=2)
+        ).grid(row=5, column=0, sticky=tk.W, padx=18, pady=2)
         ttk.Radiobutton(
             options_frame,
             text="Black",
             variable=self.bird_name_text_color_var,
             value="black",
-        ).pack(side=tk.LEFT, padx=2)
+        ).grid(row=6, column=0, sticky=tk.W, padx=18, pady=2)
 
         # Edit button
-        edit_button_frame = ttk.Frame(content)
-        edit_button_frame.grid(row=5, column=0, columnspan=2, pady=10)
+        edit_button_frame = ttk.Frame(right_column)
+        edit_button_frame.grid(row=2, column=0, sticky=tk.W, pady=10)
 
         self.edit_button = ttk.Button(edit_button_frame, text="Apply AI Editing", command=self.apply_ai_edit)
         self.edit_button.pack(side=tk.LEFT, padx=5)
 
         # Progress frame
-        edit_progress_frame = ttk.LabelFrame(content, text="Progress", padding="5")
-        edit_progress_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        edit_progress_frame = ttk.LabelFrame(right_column, text="Progress", padding="5")
+        edit_progress_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=5)
 
         self.edit_progress_var = tk.DoubleVar()
         self.edit_progress_bar = ttk.Progressbar(edit_progress_frame, variable=self.edit_progress_var, maximum=100)
@@ -616,8 +625,8 @@ class BirdClassifierGUI:
         self.edit_status_label.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
 
         # Fixed-size preview. Double-click opens the full-screen zoomable viewer.
-        display_frame = ttk.LabelFrame(content, text="Edited Preview", padding="5")
-        display_frame.grid(row=7, column=0, columnspan=2, pady=5)
+        display_frame = ttk.LabelFrame(right_column, text="Edited Preview", padding="5")
+        display_frame.grid(row=0, column=0, sticky=tk.N, pady=5)
 
         self.preview_width = 240
         self.preview_height = 240
@@ -638,23 +647,22 @@ class BirdClassifierGUI:
         self.edit_preview_canvas.bind("<Double-Button-1>", self.open_fullscreen_preview)
 
         # Modification input frame
-        modify_frame = ttk.LabelFrame(content, text="Make Changes to the Edit", padding="5")
-        modify_frame.grid(row=8, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        modify_frame = ttk.LabelFrame(right_column, text="Make Changes to the Edit", padding="5")
+        modify_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
+        modify_frame.columnconfigure(0, weight=1)
 
         self.edit_modify_text = tk.StringVar()
-        ttk.Entry(modify_frame, textvariable=self.edit_modify_text, width=60).pack(side=tk.LEFT, padx=5, pady=5)
-        ttk.Button(modify_frame, text="Apply", command=self.apply_edit_modification).pack(side=tk.LEFT, padx=5)
+        ttk.Entry(modify_frame, textvariable=self.edit_modify_text, width=40).grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
+        ttk.Button(modify_frame, text="Apply", command=self.apply_edit_modification).grid(row=0, column=1, padx=5, pady=5)
 
         # Save button
-        save_button_frame = ttk.Frame(content)
-        save_button_frame.grid(row=9, column=0, columnspan=2, pady=10)
+        save_button_frame = ttk.Frame(right_column)
+        save_button_frame.grid(row=4, column=0, sticky=tk.W, pady=10)
 
         self.save_edit_button = ttk.Button(save_button_frame, text="Save Edited Image", command=self.save_edited_image, state='disabled')
         self.save_edit_button.pack(side=tk.LEFT, padx=5)
 
-        # Configure grid weights for editing content
-        content.columnconfigure(1, weight=1)
-        content.rowconfigure(7, weight=1)
+        left_column.columnconfigure(0, weight=1)
 
         # Store original and edited images
         self.original_edit_image = None
@@ -665,7 +673,6 @@ class BirdClassifierGUI:
         self.fullscreen_canvas = None
         self.fullscreen_photo = None
         self.fullscreen_image_id = None
-        self.editing_scroll_canvas = None
 
         self.setup_edit_drag_and_drop(parent, content)
 
@@ -866,8 +873,8 @@ class BirdClassifierGUI:
         self.fullscreen_canvas.bind("<Shift-MouseWheel>", self.on_fullscreen_shift_mousewheel)
         self.fullscreen_canvas.bind("<Control-MouseWheel>", self.on_fullscreen_zoom_wheel)
         self.fullscreen_canvas.bind("<Command-MouseWheel>", self.on_fullscreen_zoom_wheel)
-        self.fullscreen_canvas.bind("<Button-4>", lambda event: self.fullscreen_canvas.yview_scroll(-3, "units"))
-        self.fullscreen_canvas.bind("<Button-5>", lambda event: self.fullscreen_canvas.yview_scroll(3, "units"))
+        self.fullscreen_canvas.bind("<Button-4>", self.on_fullscreen_scroll_up)
+        self.fullscreen_canvas.bind("<Button-5>", self.on_fullscreen_scroll_down)
         try:
             self.fullscreen_canvas.bind("<Magnify>", self.on_fullscreen_magnify)
         except tk.TclError:
@@ -888,10 +895,22 @@ class BirdClassifierGUI:
     def on_fullscreen_mousewheel(self, event):
         if self.fullscreen_canvas:
             self.fullscreen_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        return "break"
 
     def on_fullscreen_shift_mousewheel(self, event):
         if self.fullscreen_canvas:
             self.fullscreen_canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+        return "break"
+
+    def on_fullscreen_scroll_up(self, event):
+        if self.fullscreen_canvas:
+            self.fullscreen_canvas.yview_scroll(-3, "units")
+        return "break"
+
+    def on_fullscreen_scroll_down(self, event):
+        if self.fullscreen_canvas:
+            self.fullscreen_canvas.yview_scroll(3, "units")
+        return "break"
 
     def on_fullscreen_zoom_wheel(self, event):
         if event.delta > 0:
@@ -905,30 +924,53 @@ class BirdClassifierGUI:
         self.update_fullscreen_image_display()
         return "break"
 
-    def bind_editing_scroll(self, canvas):
-        """Route mouse-wheel gestures to the Editing tab scroller."""
-        self.editing_scroll_canvas = canvas
-        self.root.bind_all("<MouseWheel>", self.on_editing_scroll_mousewheel)
-        self.root.bind_all("<Button-4>", self.on_editing_scroll_up)
-        self.root.bind_all("<Button-5>", self.on_editing_scroll_down)
+    def bind_app_scroll_events(self):
+        """Make two-finger/mouse-wheel scrolling work across scrollable app areas."""
+        self.root.bind_all("<MouseWheel>", self.on_app_mousewheel, add="+")
+        self.root.bind_all("<Shift-MouseWheel>", self.on_app_shift_mousewheel, add="+")
+        self.root.bind_all("<Button-4>", self.on_app_scroll_up, add="+")
+        self.root.bind_all("<Button-5>", self.on_app_scroll_down, add="+")
 
-    def unbind_editing_scroll(self):
-        self.root.unbind_all("<MouseWheel>")
-        self.root.unbind_all("<Button-4>")
-        self.root.unbind_all("<Button-5>")
-        self.editing_scroll_canvas = None
+    def find_scrollable_widget(self, widget, horizontal=False):
+        """Find the nearest ancestor that can scroll in the requested direction."""
+        while widget:
+            if widget is self.edit_preview_canvas:
+                widget = widget.master
+                continue
 
-    def on_editing_scroll_mousewheel(self, event):
-        if getattr(self, 'editing_scroll_canvas', None):
-            self.editing_scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            view_method = "xview" if horizontal else "yview"
+            if hasattr(widget, view_method):
+                return widget
+            widget = getattr(widget, "master", None)
+        return None
 
-    def on_editing_scroll_up(self, event):
-        if getattr(self, 'editing_scroll_canvas', None):
-            self.editing_scroll_canvas.yview_scroll(-3, "units")
+    def scroll_widget(self, widget, amount, horizontal=False):
+        if not widget:
+            return
 
-    def on_editing_scroll_down(self, event):
-        if getattr(self, 'editing_scroll_canvas', None):
-            self.editing_scroll_canvas.yview_scroll(3, "units")
+        if horizontal and hasattr(widget, "xview_scroll"):
+            widget.xview_scroll(amount, "units")
+        elif not horizontal and hasattr(widget, "yview_scroll"):
+            widget.yview_scroll(amount, "units")
+
+    def on_app_mousewheel(self, event):
+        if event.state & 0x0004:
+            return
+
+        widget = self.find_scrollable_widget(event.widget)
+        self.scroll_widget(widget, int(-1 * (event.delta / 120)))
+
+    def on_app_shift_mousewheel(self, event):
+        widget = self.find_scrollable_widget(event.widget, horizontal=True)
+        self.scroll_widget(widget, int(-1 * (event.delta / 120)), horizontal=True)
+
+    def on_app_scroll_up(self, event):
+        widget = self.find_scrollable_widget(event.widget)
+        self.scroll_widget(widget, -3)
+
+    def on_app_scroll_down(self, event):
+        widget = self.find_scrollable_widget(event.widget)
+        self.scroll_widget(widget, 3)
 
     def setup_edit_drag_and_drop(self, parent, content):
         """Enable OS file drops on the Editing tab when tkinterdnd2 is available."""
@@ -1228,7 +1270,7 @@ Create a {aspect_label} edited version of this exact image following these requi
             self.queue.put({'type': 'edit_button_ready'})
 
     def _add_bird_name_label(self, image, bird_name, text_color):
-        """Draw the optional bird name top-right with capped Noto Sans text height."""
+        """Draw the optional bird name top-right with capped Lexend Giga text height."""
         if not bird_name:
             return image
 
@@ -1240,14 +1282,14 @@ Create a {aspect_label} edited version of this exact image following these requi
         horizontal_padding = max(12, int(width * 0.04))
         max_text_width = width - (horizontal_padding * 2)
 
-        font = self._load_noto_sans_font(max_text_height)
+        font = self._load_overlay_font(max_text_height)
         while font.size > 8:
             bbox = draw.textbbox((0, 0), bird_name, font=font)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
             if text_width <= max_text_width and text_height <= max_text_height:
                 break
-            font = self._load_noto_sans_font(font.size - 1)
+            font = self._load_overlay_font(font.size - 1)
 
         bbox = draw.textbbox((0, 0), bird_name, font=font)
         text_width = bbox[2] - bbox[0]
@@ -1262,9 +1304,14 @@ Create a {aspect_label} edited version of this exact image following these requi
         )
         return output.convert(image.mode if image.mode in ("RGB", "RGBA") else "RGB")
 
-    def _load_noto_sans_font(self, size):
-        """Load Noto Sans when available, with a safe fallback."""
+    def _load_overlay_font(self, size):
+        """Load Lexend Giga when available, with safe fallbacks."""
         font_paths = [
+            "/usr/share/fonts/truetype/lexend/LexendGiga-Regular.ttf",
+            "/usr/share/fonts/truetype/lexend-giga/LexendGiga-Regular.ttf",
+            "/usr/share/fonts/truetype/google-fonts/LexendGiga-Regular.ttf",
+            "/Library/Fonts/LexendGiga-Regular.ttf",
+            "C:/Windows/Fonts/LexendGiga-Regular.ttf",
             "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/Library/Fonts/NotoSans-Regular.ttf",
@@ -1273,6 +1320,11 @@ Create a {aspect_label} edited version of this exact image following these requi
         for font_path in font_paths:
             if os.path.exists(font_path):
                 return ImageFont.truetype(font_path, size=size)
+
+        try:
+            return ImageFont.truetype("LexendGiga-Regular.ttf", size=size)
+        except OSError:
+            pass
 
         try:
             return ImageFont.truetype("NotoSans-Regular.ttf", size=size)
