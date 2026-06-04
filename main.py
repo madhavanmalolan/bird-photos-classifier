@@ -71,6 +71,13 @@ def encode_image(image_path):
     with open(image_path, 'rb') as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
+def get_image_mime_type(image_path):
+    """Return a Gemini-compatible MIME type for supported image files."""
+    suffix = Path(image_path).suffix.lower()
+    if suffix == '.png':
+        return 'image/png'
+    return 'image/jpeg'
+
 def call_gemini_api(api_key, prompt, image_path=None):
     """Make API call to Gemini."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={api_key}"
@@ -84,7 +91,7 @@ def call_gemini_api(api_key, prompt, image_path=None):
         image_data = encode_image(image_path)
         parts.append({
             "inline_data": {
-                "mime_type": "image/jpeg",
+                "mime_type": get_image_mime_type(image_path),
                 "data": image_data
             }
         })
@@ -102,7 +109,7 @@ def call_gemini_api(api_key, prompt, image_path=None):
     except requests.exceptions.RequestException as e:
         raise Exception(f"API request failed: {str(e)}")
 
-def call_gemini_image_api(api_key, prompt, image_path=None, watermark_path=None):
+def call_gemini_image_api(api_key, prompt, image_path=None, watermark_path=None, aspect_ratio=None):
     """Make API call to Gemini for image generation/editing."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent"
 
@@ -118,7 +125,7 @@ def call_gemini_image_api(api_key, prompt, image_path=None, watermark_path=None)
         image_data = encode_image(image_path)
         parts.append({
             "inline_data": {
-                "mime_type": "image/jpeg",
+                "mime_type": get_image_mime_type(image_path),
                 "data": image_data
             }
         })
@@ -128,15 +135,25 @@ def call_gemini_image_api(api_key, prompt, image_path=None, watermark_path=None)
         watermark_data = encode_image(watermark_path)
         parts.append({
             "inline_data": {
-                "mime_type": "image/jpeg",
+                "mime_type": get_image_mime_type(watermark_path),
                 "data": watermark_data
             }
         })
 
+    generation_config = {
+        "responseModalities": ["IMAGE"]
+    }
+    if aspect_ratio:
+        generation_config["imageConfig"] = {
+            "aspectRatio": aspect_ratio,
+            "imageSize": "1K",
+        }
+
     data = {
         "contents": [{
             "parts": parts
-        }]
+        }],
+        "generationConfig": generation_config,
     }
 
     try:
@@ -537,16 +554,45 @@ class BirdClassifierGUI:
         ttk.Radiobutton(aspect_frame, text="Vertical (9x16)", variable=self.aspect_ratio_var, value="vertical").pack(side=tk.LEFT, padx=10)
         ttk.Radiobutton(aspect_frame, text="Horizontal (16x9)", variable=self.aspect_ratio_var, value="horizontal").pack(side=tk.LEFT, padx=10)
 
+        # Edit options
+        options_frame = ttk.LabelFrame(content, text="Edit Options", padding="5")
+        options_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        self.fix_lighting_color_var = tk.BooleanVar(value=True)
+        self.fix_blur_var = tk.BooleanVar(value=False)
+        self.focus_on_bird_var = tk.BooleanVar(value=True)
+        self.add_bird_name_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            options_frame,
+            text="Fix lighting and color",
+            variable=self.fix_lighting_color_var,
+        ).pack(side=tk.LEFT, padx=10)
+        ttk.Checkbutton(
+            options_frame,
+            text="Fix blur",
+            variable=self.fix_blur_var,
+        ).pack(side=tk.LEFT, padx=10)
+        ttk.Checkbutton(
+            options_frame,
+            text="Focus on bird",
+            variable=self.focus_on_bird_var,
+        ).pack(side=tk.LEFT, padx=10)
+        ttk.Checkbutton(
+            options_frame,
+            text="Add name",
+            variable=self.add_bird_name_var,
+        ).pack(side=tk.LEFT, padx=10)
+
         # Edit button
         edit_button_frame = ttk.Frame(content)
-        edit_button_frame.grid(row=4, column=0, columnspan=2, pady=10)
+        edit_button_frame.grid(row=5, column=0, columnspan=2, pady=10)
 
         self.edit_button = ttk.Button(edit_button_frame, text="Apply AI Editing", command=self.apply_ai_edit)
         self.edit_button.pack(side=tk.LEFT, padx=5)
 
         # Progress frame
         edit_progress_frame = ttk.LabelFrame(content, text="Progress", padding="5")
-        edit_progress_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        edit_progress_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         self.edit_progress_var = tk.DoubleVar()
         self.edit_progress_bar = ttk.Progressbar(edit_progress_frame, variable=self.edit_progress_var, maximum=100)
@@ -557,7 +603,7 @@ class BirdClassifierGUI:
 
         # Fixed-size preview. Double-click opens the full-screen zoomable viewer.
         display_frame = ttk.LabelFrame(content, text="Edited Preview", padding="5")
-        display_frame.grid(row=6, column=0, columnspan=2, pady=5)
+        display_frame.grid(row=7, column=0, columnspan=2, pady=5)
 
         self.preview_width = 240
         self.preview_height = 240
@@ -579,7 +625,7 @@ class BirdClassifierGUI:
 
         # Modification input frame
         modify_frame = ttk.LabelFrame(content, text="Make Changes to the Edit", padding="5")
-        modify_frame.grid(row=7, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        modify_frame.grid(row=8, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         self.edit_modify_text = tk.StringVar()
         ttk.Entry(modify_frame, textvariable=self.edit_modify_text, width=60).pack(side=tk.LEFT, padx=5, pady=5)
@@ -587,14 +633,14 @@ class BirdClassifierGUI:
 
         # Save button
         save_button_frame = ttk.Frame(content)
-        save_button_frame.grid(row=8, column=0, columnspan=2, pady=10)
+        save_button_frame.grid(row=9, column=0, columnspan=2, pady=10)
 
         self.save_edit_button = ttk.Button(save_button_frame, text="Save Edited Image", command=self.save_edited_image, state='disabled')
         self.save_edit_button.pack(side=tk.LEFT, padx=5)
 
         # Configure grid weights for editing content
         content.columnconfigure(1, weight=1)
-        content.rowconfigure(6, weight=1)
+        content.rowconfigure(7, weight=1)
 
         # Store original and edited images
         self.original_edit_image = None
@@ -942,6 +988,7 @@ class BirdClassifierGUI:
                 self.aspect_ratio_var.get(),
                 self.edit_bird_name.get().strip(),
                 self.edit_watermark_path.get().strip(),
+                self.get_edit_options(),
             ),
         )
         thread.daemon = True
@@ -977,6 +1024,7 @@ class BirdClassifierGUI:
                 self.aspect_ratio_var.get(),
                 self.edit_bird_name.get().strip(),
                 self.edit_watermark_path.get().strip(),
+                self.get_edit_options(),
             ),
         )
         thread.daemon = True
@@ -997,15 +1045,27 @@ class BirdClassifierGUI:
 
         if file_path:
             try:
-                self.current_edited_image.save(file_path, quality=95)
+                if Path(file_path).suffix.lower() == '.png':
+                    self.current_edited_image.save(file_path, format='PNG')
+                else:
+                    self.current_edited_image.convert('RGB').save(file_path, format='JPEG', quality=95)
                 messagebox.showinfo("Success", f"Image saved to {file_path}")
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save image: {str(e)}")
 
-    def _perform_ai_edit(self, image_path, api_key, modification=None, aspect_ratio='square', bird_name='', user_watermark=''):
+    def get_edit_options(self):
+        return {
+            'fix_lighting_color': self.fix_lighting_color_var.get(),
+            'fix_blur': self.fix_blur_var.get(),
+            'focus_on_bird': self.focus_on_bird_var.get(),
+            'add_bird_name': self.add_bird_name_var.get(),
+        }
+
+    def _perform_ai_edit(self, image_path, api_key, modification=None, aspect_ratio='square', bird_name='', user_watermark='', edit_options=None):
         """Perform AI-guided editing in background thread"""
         temp_path = None
         try:
+            edit_options = edit_options or {}
             # Load original image if not already loaded
             if not self.original_edit_image:
                 self.queue.put({'type': 'edit_progress', 'value': 10, 'text': 'Loading image...'})
@@ -1013,9 +1073,22 @@ class BirdClassifierGUI:
 
             self.queue.put({'type': 'edit_progress', 'value': 20, 'text': 'Sending to AI for editing...'})
 
-            # Save image to temp file for API
-            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
-                self.original_edit_image.save(tmp.name, format='JPEG', quality=95)
+            # Save image to temp file for API without losing PNG support.
+            input_suffix = Path(image_path).suffix.lower()
+            if input_suffix == '.png':
+                temp_suffix = '.png'
+                temp_format = 'PNG'
+                upload_image = self.original_edit_image
+            else:
+                temp_suffix = '.jpg'
+                temp_format = 'JPEG'
+                upload_image = self.original_edit_image.convert('RGB')
+
+            with tempfile.NamedTemporaryFile(suffix=temp_suffix, delete=False) as tmp:
+                if temp_format == 'JPEG':
+                    upload_image.save(tmp.name, format=temp_format, quality=95)
+                else:
+                    upload_image.save(tmp.name, format=temp_format)
                 temp_path = tmp.name
 
             # Resolve watermark: user-selected first, then default watermark.jpg
@@ -1038,40 +1111,59 @@ class BirdClassifierGUI:
                 'horizontal': ('HORIZONTAL', '16:9 aspect ratio (landscape, wider than tall)'),
             }
             aspect_label, aspect_desc = aspect_specs[aspect_ratio]
+            api_aspect_ratio = {
+                'square': '1:1',
+                'vertical': '9:16',
+                'horizontal': '16:9',
+            }[aspect_ratio]
 
+            edit_instructions = []
+            if edit_options.get('fix_lighting_color'):
+                edit_instructions.append(
+                    "- Fix lighting, exposure, white balance, color profile, contrast, and tone so the photograph looks professionally finished in the style of a National Geographic bird photographer."
+                )
+            if edit_options.get('fix_blur'):
+                edit_instructions.append(
+                    "- If the bird is blurred, soft, out of focus, or affected by motion blur, reduce blur and improve sharpness/detail on the bird only as a photographer would. Correct motion blur only where existing edges and details are visible. Never change the bird's pose, silhouette, anatomy, expression, eye shape, beak shape, feather layout, wing position, leg position, or feet. Do not invent new feather patterns, anatomy, pose, eyes, beak, legs, or background details."
+                )
+            if edit_options.get('focus_on_bird'):
+                edit_instructions.append(
+                    "- Reframe only through crop, zoom, and pan so the bird is prominent and centered in the frame with a strong wildlife-photography composition."
+                )
             if modification:
-                prompt = f"""Edit this bird photograph with the following changes: {modification}
+                edit_instructions.append(f"- Apply this additional user-requested adjustment: {modification}")
+            if not edit_instructions:
+                edit_instructions.append("- Make no aesthetic corrections beyond preserving the requested aspect ratio and any watermark placement.")
+
+            selected_edits = "\n".join(edit_instructions)
+            prompt = f"""Edit this bird photograph using ONLY the requested corrections below.
+
+REQUESTED CORRECTIONS:
+{selected_edits}
 
 CRITICAL REQUIREMENTS:
-- DO NOT change the bird itself or the surroundings
-- You CAN: zoom in/out, pan (move the frame), crop, adjust lighting, colors, contrast, and sharpness
 - Make the output a {aspect_label} image ({aspect_desc}) - VERY IMPORTANT
-- Zoom and pan to frame the bird for the best professional composition
-- Apply professional color grading like a National Geographic photographer
-- The bird and background must remain unchanged - only enhance through zoom, pan, and lighting adjustments{watermark_instruction}
+- This must remain the same photograph. Do not make meaningful content changes. Only make photographer-style edits similar to Lightroom/Photoshop adjustments.
+- Preserve the original photograph. Do not replace the bird, do not generate a new bird, and do not synthesize a different scene.
+- Keep the exact same bird species, pose, silhouette, anatomy, body proportions, expression, eye shape, beak shape, feather layout, plumage markings, wing position, leg position, feet, surroundings, background, and lighting direction unless a selected correction requires a subtle photographic adjustment.
+- Never change the pose or features of the bird. The bird must not look like a different individual, a cleaner/generated version, or a species-reference reconstruction.
+- Do not add or remove objects, branches, leaves, watermarks, text, birds, body parts, or background elements, except for the requested watermark if provided.
+- Be extremely strict about not inventing image content. Do not hallucinate, fabricate, reconstruct, guess, or add any detail that is not already visibly present in the source image.
+- Do not create new feather barbs, feather patterns, eye catchlights, beak edges, claws, legs, wing outlines, branch texture, leaf texture, background texture, bokeh, shadows, highlights, or scenery that are not already present.
+- For blur or motion-blur correction, only improve clarity of existing visible pixels and edges. If a detail is not visible enough to recover from the source image, leave it soft rather than inventing it.
+- Sharpening must be conservative and photographic, not generative. Do not use external knowledge of what this species should look like to add missing detail or alter visible features.
+- Use only non-destructive photographic edits: crop, zoom, pan, exposure, color, contrast, white balance, sharpening, and blur reduction when requested. No relighting, repainting, generative cleanup, denoising that changes texture, or content-aware fill.
+- If an edit option is not requested, leave that aspect of the photo unchanged.{watermark_instruction}
 
-Create a {aspect_label} edited version of this image following these requirements."""
-            else:
-                prompt = f"""Edit this bird photograph to create a professional National Geographic-style image.
-
-CRITICAL REQUIREMENTS:
-- DO NOT change the bird itself or the surroundings
-- You CAN: zoom in/out, pan (move the frame), crop, adjust lighting, colors, contrast, and sharpness
-- Make the output a {aspect_label} image ({aspect_desc}) - VERY IMPORTANT
-- Zoom and pan to frame the bird for the best professional composition
-- Fix color profile and lighting for professional look
-- Enhance sharpness and contrast
-- The bird and background must remain unchanged - only enhance through zoom, pan, and lighting adjustments{watermark_instruction}
-
-Create a {aspect_label} edited version of this image following these requirements."""
+Create a {aspect_label} edited version of this exact image following these requirements."""
 
             self.queue.put({'type': 'edit_progress', 'value': 40, 'text': 'AI is processing the image...'})
 
             # Call Gemini image API with watermark if it exists
             if watermark_exists:
-                response = call_gemini_image_api(api_key, prompt, temp_path, str(watermark_path))
+                response = call_gemini_image_api(api_key, prompt, temp_path, str(watermark_path), api_aspect_ratio)
             else:
-                response = call_gemini_image_api(api_key, prompt, temp_path)
+                response = call_gemini_image_api(api_key, prompt, temp_path, aspect_ratio=api_aspect_ratio)
 
             self.queue.put({'type': 'edit_progress', 'value': 70, 'text': 'Extracting edited image...'})
 
@@ -1090,7 +1182,8 @@ Create a {aspect_label} edited version of this image following these requirement
 
             # Ensure the image matches the requested aspect ratio
             edited_image = self._ensure_aspect_ratio(edited_image, aspect_ratio)
-            edited_image = self._add_bird_name_label(edited_image, bird_name)
+            if edit_options.get('add_bird_name'):
+                edited_image = self._add_bird_name_label(edited_image, bird_name)
 
             # Store the edited image
             self.current_edited_image = edited_image
