@@ -498,9 +498,11 @@ class BirdClassifierGUI:
         scroll_canvas = tk.Canvas(parent, highlightthickness=0)
         scroll_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
-        scroll_bar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=scroll_canvas.yview)
-        scroll_bar.grid(row=0, column=1, sticky=(tk.N, tk.S))
-        scroll_canvas.configure(yscrollcommand=scroll_bar.set)
+        v_scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=scroll_canvas.yview)
+        h_scrollbar = ttk.Scrollbar(parent, orient=tk.HORIZONTAL, command=scroll_canvas.xview)
+        v_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        h_scrollbar.grid(row=1, column=0, sticky=(tk.W, tk.E))
+        scroll_canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
 
         content = ttk.Frame(scroll_canvas)
         content_window = scroll_canvas.create_window((0, 0), window=content, anchor=tk.NW)
@@ -509,7 +511,7 @@ class BirdClassifierGUI:
             scroll_canvas.configure(scrollregion=scroll_canvas.bbox(tk.ALL))
 
         def fit_content_width(event):
-            scroll_canvas.itemconfigure(content_window, width=event.width)
+            scroll_canvas.itemconfigure(content_window, width=max(event.width, content.winfo_reqwidth()))
 
         content.bind("<Configure>", update_scroll_region)
         scroll_canvas.bind("<Configure>", fit_content_width)
@@ -572,6 +574,7 @@ class BirdClassifierGUI:
         self.focus_on_bird_var = tk.BooleanVar(value=True)
         self.add_bird_name_var = tk.BooleanVar(value=True)
         self.bird_name_text_color_var = tk.StringVar(value="white")
+        self.bird_name_text_size_var = tk.StringVar(value="small")
         ttk.Checkbutton(
             options_frame,
             text="Fix lighting and color",
@@ -605,17 +608,58 @@ class BirdClassifierGUI:
             variable=self.bird_name_text_color_var,
             value="black",
         ).grid(row=6, column=0, sticky=tk.W, padx=18, pady=2)
+        ttk.Label(options_frame, text="Text size").grid(row=7, column=0, sticky=tk.W, padx=8, pady=(8, 2))
+        ttk.Radiobutton(
+            options_frame,
+            text="Small",
+            variable=self.bird_name_text_size_var,
+            value="small",
+        ).grid(row=8, column=0, sticky=tk.W, padx=18, pady=2)
+        ttk.Radiobutton(
+            options_frame,
+            text="Medium",
+            variable=self.bird_name_text_size_var,
+            value="medium",
+        ).grid(row=9, column=0, sticky=tk.W, padx=18, pady=2)
+        ttk.Radiobutton(
+            options_frame,
+            text="Large",
+            variable=self.bird_name_text_size_var,
+            value="large",
+        ).grid(row=10, column=0, sticky=tk.W, padx=18, pady=2)
+
+        # Additional instructions and main edit button
+        additional_frame = ttk.LabelFrame(left_column, text="Additional editing instructions", padding="5")
+        additional_frame.grid(row=5, column=0, sticky=(tk.W, tk.E), pady=5)
+        additional_frame.columnconfigure(0, weight=1)
+
+        ttk.Label(additional_frame, text="Additional editing instructions:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=(0, 2))
+        self.additional_edit_instructions_text = tk.Text(additional_frame, width=42, height=4, wrap=tk.WORD)
+        self.additional_edit_instructions_text.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=2)
 
         # Edit button
-        edit_button_frame = ttk.Frame(right_column)
-        edit_button_frame.grid(row=2, column=0, sticky=tk.W, pady=10)
+        edit_button_frame = ttk.Frame(left_column)
+        edit_button_frame.grid(row=6, column=0, sticky=tk.W, pady=10)
 
-        self.edit_button = ttk.Button(edit_button_frame, text="Apply AI Editing", command=self.apply_ai_edit)
+        self.edit_button = tk.Button(
+            edit_button_frame,
+            text="Apply AI Editing",
+            command=self.apply_ai_edit,
+            bg="#16a34a",
+            fg="white",
+            activebackground="#22c55e",
+            activeforeground="white",
+            disabledforeground="#14532d",
+            font=("TkDefaultFont", 10, "bold"),
+            relief=tk.RAISED,
+            padx=12,
+            pady=6,
+        )
         self.edit_button.pack(side=tk.LEFT, padx=5)
 
         # Progress frame
         edit_progress_frame = ttk.LabelFrame(right_column, text="Progress", padding="5")
-        edit_progress_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=5)
+        edit_progress_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
 
         self.edit_progress_var = tk.DoubleVar()
         self.edit_progress_bar = ttk.Progressbar(edit_progress_frame, variable=self.edit_progress_var, maximum=100)
@@ -646,18 +690,9 @@ class BirdClassifierGUI:
         )
         self.edit_preview_canvas.bind("<Double-Button-1>", self.open_fullscreen_preview)
 
-        # Modification input frame
-        modify_frame = ttk.LabelFrame(right_column, text="Make Changes to the Edit", padding="5")
-        modify_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
-        modify_frame.columnconfigure(0, weight=1)
-
-        self.edit_modify_text = tk.StringVar()
-        ttk.Entry(modify_frame, textvariable=self.edit_modify_text, width=40).grid(row=0, column=0, sticky=(tk.W, tk.E), padx=5, pady=5)
-        ttk.Button(modify_frame, text="Apply", command=self.apply_edit_modification).grid(row=0, column=1, padx=5, pady=5)
-
         # Save button
         save_button_frame = ttk.Frame(right_column)
-        save_button_frame.grid(row=4, column=0, sticky=tk.W, pady=10)
+        save_button_frame.grid(row=2, column=0, sticky=tk.W, pady=10)
 
         self.save_edit_button = ttk.Button(save_button_frame, text="Save Edited Image", command=self.save_edited_image, state='disabled')
         self.save_edit_button.pack(side=tk.LEFT, padx=5)
@@ -735,10 +770,10 @@ class BirdClassifierGUI:
                 elif msg['type'] == 'edit_image':
                     self.update_edited_image_display()
                 elif msg['type'] == 'edit_button_ready':
-                    self.edit_button.state(['!disabled'])
+                    self.edit_button.config(state=tk.NORMAL)
                 elif msg['type'] == 'edit_complete':
                     self.save_edit_button.state(['!disabled'])
-                    self.edit_button.state(['!disabled'])
+                    self.edit_button.config(state=tk.NORMAL)
         except Empty:
             pass
         finally:
@@ -771,8 +806,8 @@ class BirdClassifierGUI:
         # Disable save button
         self.save_edit_button.state(['disabled'])
 
-        # Clear modification text
-        self.edit_modify_text.set("")
+        # Clear additional instructions
+        self.additional_edit_instructions_text.delete("1.0", tk.END)
 
     def zoom_in(self):
         """Zoom in on the edited image"""
@@ -926,10 +961,18 @@ class BirdClassifierGUI:
 
     def bind_app_scroll_events(self):
         """Make two-finger/mouse-wheel scrolling work across scrollable app areas."""
-        self.root.bind_all("<MouseWheel>", self.on_app_mousewheel, add="+")
-        self.root.bind_all("<Shift-MouseWheel>", self.on_app_shift_mousewheel, add="+")
-        self.root.bind_all("<Button-4>", self.on_app_scroll_up, add="+")
-        self.root.bind_all("<Button-5>", self.on_app_scroll_down, add="+")
+        self.bind_all_if_supported("<MouseWheel>", self.on_app_mousewheel)
+        self.bind_all_if_supported("<Shift-MouseWheel>", self.on_app_shift_mousewheel)
+        self.bind_all_if_supported("<Button-4>", self.on_app_scroll_up)
+        self.bind_all_if_supported("<Button-5>", self.on_app_scroll_down)
+        self.bind_all_if_supported("<Button-6>", self.on_app_scroll_left)
+        self.bind_all_if_supported("<Button-7>", self.on_app_scroll_right)
+
+    def bind_all_if_supported(self, sequence, callback):
+        try:
+            self.root.bind_all(sequence, callback, add="+")
+        except tk.TclError:
+            pass
 
     def find_scrollable_widget(self, widget, horizontal=False):
         """Find the nearest ancestor that can scroll in the requested direction."""
@@ -956,21 +999,40 @@ class BirdClassifierGUI:
     def on_app_mousewheel(self, event):
         if event.state & 0x0004:
             return
+        if isinstance(event.widget, tk.Text):
+            return
 
         widget = self.find_scrollable_widget(event.widget)
         self.scroll_widget(widget, int(-1 * (event.delta / 120)))
 
     def on_app_shift_mousewheel(self, event):
+        if isinstance(event.widget, tk.Text):
+            return
+
         widget = self.find_scrollable_widget(event.widget, horizontal=True)
         self.scroll_widget(widget, int(-1 * (event.delta / 120)), horizontal=True)
 
     def on_app_scroll_up(self, event):
+        if isinstance(event.widget, tk.Text):
+            return
+
         widget = self.find_scrollable_widget(event.widget)
         self.scroll_widget(widget, -3)
 
     def on_app_scroll_down(self, event):
+        if isinstance(event.widget, tk.Text):
+            return
+
         widget = self.find_scrollable_widget(event.widget)
         self.scroll_widget(widget, 3)
+
+    def on_app_scroll_left(self, event):
+        widget = self.find_scrollable_widget(event.widget, horizontal=True)
+        self.scroll_widget(widget, -3, horizontal=True)
+
+    def on_app_scroll_right(self, event):
+        widget = self.find_scrollable_widget(event.widget, horizontal=True)
+        self.scroll_widget(widget, 3, horizontal=True)
 
     def setup_edit_drag_and_drop(self, parent, content):
         """Enable OS file drops on the Editing tab when tkinterdnd2 is available."""
@@ -1030,9 +1092,10 @@ class BirdClassifierGUI:
             return
 
         # Disable button and reset progress
-        self.edit_button.state(['disabled'])
+        self.edit_button.config(state=tk.DISABLED)
         self.edit_progress_var.set(0)
         self.edit_status_label.config(text="Starting AI editing...")
+        additional_instructions = self.additional_edit_instructions_text.get("1.0", tk.END).strip()
 
         # Start editing in a separate thread
         thread = threading.Thread(
@@ -1040,43 +1103,7 @@ class BirdClassifierGUI:
             args=(
                 image_path,
                 api_key,
-                None,
-                self.aspect_ratio_var.get(),
-                self.edit_bird_name.get().strip(),
-                self.edit_watermark_path.get().strip(),
-                self.get_edit_options(),
-            ),
-        )
-        thread.daemon = True
-        thread.start()
-
-    def apply_edit_modification(self):
-        """Apply modifications to the edited image"""
-        if not self.original_edit_image:
-            messagebox.showerror("Error", "Please apply AI editing first")
-            return
-
-        modification = self.edit_modify_text.get().strip()
-        if not modification:
-            messagebox.showerror("Error", "Please enter modification instructions")
-            return
-
-        api_key = self.api_key_var.get().strip()
-        if not api_key:
-            messagebox.showerror("Error", "Please enter your Google API Key")
-            return
-
-        # Reset progress
-        self.edit_progress_var.set(0)
-        self.edit_status_label.config(text="Applying modifications...")
-
-        # Start editing in a separate thread
-        thread = threading.Thread(
-            target=self._perform_ai_edit,
-            args=(
-                self.edit_image_path.get(),
-                api_key,
-                modification,
+                additional_instructions,
                 self.aspect_ratio_var.get(),
                 self.edit_bird_name.get().strip(),
                 self.edit_watermark_path.get().strip(),
@@ -1116,6 +1143,7 @@ class BirdClassifierGUI:
             'focus_on_bird': self.focus_on_bird_var.get(),
             'add_bird_name': self.add_bird_name_var.get(),
             'bird_name_text_color': self.bird_name_text_color_var.get(),
+            'bird_name_text_size': self.bird_name_text_size_var.get(),
         }
 
     def _perform_ai_edit(self, image_path, api_key, modification=None, aspect_ratio='square', bird_name='', user_watermark='', edit_options=None):
@@ -1188,7 +1216,10 @@ class BirdClassifierGUI:
                     "- Reframe only through crop, zoom, and pan so the bird is prominent and centered in the frame with a strong wildlife-photography composition."
                 )
             if modification:
-                edit_instructions.append(f"- Apply this additional user-requested adjustment: {modification}")
+                edit_instructions.append(
+                    "- Apply these additional user-requested editing instructions only if they can be done as photographer-style edits without changing the pose, features, anatomy, objects, background elements, or factual content of the photo. These additional instructions must never override the critical requirements below: "
+                    f"{modification}"
+                )
             if not edit_instructions:
                 edit_instructions.append("- Make no aesthetic corrections beyond preserving the requested aspect ratio and any watermark placement.")
 
@@ -1244,6 +1275,7 @@ Create a {aspect_label} edited version of this exact image following these requi
                     edited_image,
                     bird_name,
                     edit_options.get('bird_name_text_color', 'white'),
+                    edit_options.get('bird_name_text_size', 'small'),
                 )
 
             # Store the edited image
@@ -1269,16 +1301,21 @@ Create a {aspect_label} edited version of this exact image following these requi
                     pass
             self.queue.put({'type': 'edit_button_ready'})
 
-    def _add_bird_name_label(self, image, bird_name, text_color):
+    def _add_bird_name_label(self, image, bird_name, text_color, text_size):
         """Draw the optional bird name top-right with capped Lexend Giga text height."""
         if not bird_name:
             return image
 
         text_color = 'black' if text_color == 'black' else 'white'
+        size_multiplier = {
+            'small': 1,
+            'medium': 2,
+            'large': 3,
+        }.get(text_size, 1)
         output = image.convert("RGBA")
         draw = ImageDraw.Draw(output)
         width, height = output.size
-        max_text_height = max(1, int(height * 0.10))
+        max_text_height = max(1, int(height * 0.05 * size_multiplier))
         horizontal_padding = max(12, int(width * 0.04))
         max_text_width = width - (horizontal_padding * 2)
 
