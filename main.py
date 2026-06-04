@@ -637,29 +637,21 @@ class BirdClassifierGUI:
         self.additional_edit_instructions_text = tk.Text(additional_frame, width=42, height=4, wrap=tk.WORD)
         self.additional_edit_instructions_text.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=2)
 
-        # Edit button
-        edit_button_frame = ttk.Frame(left_column)
-        edit_button_frame.grid(row=6, column=0, sticky=tk.W, pady=10)
+        # Main edit button
+        edit_button_frame = ttk.Frame(right_column)
+        edit_button_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+        edit_button_frame.columnconfigure(0, weight=1)
 
-        self.edit_button = tk.Button(
+        self.edit_button = ttk.Button(
             edit_button_frame,
             text="Apply AI Editing",
             command=self.apply_ai_edit,
-            bg="#16a34a",
-            fg="white",
-            activebackground="#22c55e",
-            activeforeground="white",
-            disabledforeground="#14532d",
-            font=("TkDefaultFont", 10, "bold"),
-            relief=tk.RAISED,
-            padx=12,
-            pady=6,
         )
-        self.edit_button.pack(side=tk.LEFT, padx=5)
+        self.edit_button.grid(row=0, column=1, sticky=tk.E, padx=5)
 
         # Progress frame
         edit_progress_frame = ttk.LabelFrame(right_column, text="Progress", padding="5")
-        edit_progress_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5)
+        edit_progress_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
 
         self.edit_progress_var = tk.DoubleVar()
         self.edit_progress_bar = ttk.Progressbar(edit_progress_frame, variable=self.edit_progress_var, maximum=100)
@@ -670,7 +662,7 @@ class BirdClassifierGUI:
 
         # Fixed-size preview. Double-click opens the full-screen zoomable viewer.
         display_frame = ttk.LabelFrame(right_column, text="Edited Preview", padding="5")
-        display_frame.grid(row=0, column=0, sticky=tk.N, pady=5)
+        display_frame.grid(row=1, column=0, sticky=tk.N, pady=5)
 
         self.preview_width = 240
         self.preview_height = 240
@@ -692,7 +684,7 @@ class BirdClassifierGUI:
 
         # Save button
         save_button_frame = ttk.Frame(right_column)
-        save_button_frame.grid(row=2, column=0, sticky=tk.W, pady=10)
+        save_button_frame.grid(row=3, column=0, sticky=tk.W, pady=10)
 
         self.save_edit_button = ttk.Button(save_button_frame, text="Save Edited Image", command=self.save_edited_image, state='disabled')
         self.save_edit_button.pack(side=tk.LEFT, padx=5)
@@ -704,10 +696,12 @@ class BirdClassifierGUI:
         self.current_edited_image = None
         self.current_edited_photo = None
         self.current_preview_photo = None
+        self.selected_preview_image = None
         self.zoom_level = 1.0
         self.fullscreen_canvas = None
         self.fullscreen_photo = None
         self.fullscreen_image_id = None
+        self.fullscreen_viewers = []
 
         self.setup_edit_drag_and_drop(parent, content)
 
@@ -770,10 +764,10 @@ class BirdClassifierGUI:
                 elif msg['type'] == 'edit_image':
                     self.update_edited_image_display()
                 elif msg['type'] == 'edit_button_ready':
-                    self.edit_button.config(state=tk.NORMAL)
+                    self.edit_button.state(['!disabled'])
                 elif msg['type'] == 'edit_complete':
                     self.save_edit_button.state(['!disabled'])
-                    self.edit_button.config(state=tk.NORMAL)
+                    self.edit_button.state(['!disabled'])
         except Empty:
             pass
         finally:
@@ -786,6 +780,7 @@ class BirdClassifierGUI:
         self.current_edited_image = None
         self.current_edited_photo = None
         self.current_preview_photo = None
+        self.selected_preview_image = None
         self._last_api_text_response = None
 
         # Reset zoom
@@ -808,6 +803,18 @@ class BirdClassifierGUI:
 
         # Clear additional instructions
         self.additional_edit_instructions_text.delete("1.0", tk.END)
+
+    def show_selected_image_preview(self, image_path):
+        """Load and display the selected source image in the preview area."""
+        try:
+            with Image.open(image_path) as image:
+                self.selected_preview_image = image.copy()
+            self.original_edit_image = self.selected_preview_image.copy()
+            self.update_preview_display(self.selected_preview_image, "Original image selected")
+        except Exception as e:
+            self.selected_preview_image = None
+            self.original_edit_image = None
+            self.edit_status_label.config(text=f"Could not preview selected image: {e}")
 
     def zoom_in(self):
         """Zoom in on the edited image"""
@@ -832,10 +839,14 @@ class BirdClassifierGUI:
         if not self.current_edited_image:
             return
 
-        width, height = self.current_edited_image.size
+        self.update_preview_display(self.current_edited_image, "Double-click for split screen")
+
+    def update_preview_display(self, image, footer_text):
+        """Update the in-tab preview with the supplied image."""
+        width, height = image.size
         scale = min(self.preview_width / width, self.preview_height / height)
         preview_size = (max(1, int(width * scale)), max(1, int(height * scale)))
-        display_image = self.current_edited_image.resize(preview_size, Image.Resampling.LANCZOS)
+        display_image = image.resize(preview_size, Image.Resampling.LANCZOS)
         self.current_preview_photo = ImageTk.PhotoImage(display_image)
 
         self.edit_preview_canvas.delete(tk.ALL)
@@ -845,30 +856,49 @@ class BirdClassifierGUI:
         self.edit_preview_canvas.create_text(
             self.preview_width // 2,
             self.preview_height - 16,
-            text="Double-click for full screen",
+            text=footer_text,
             fill="#ffffff",
         )
 
     def update_fullscreen_image_display(self):
-        """Update the full-screen viewer image at the current zoom level."""
-        if not self.current_edited_image or not self.fullscreen_canvas:
+        """Update the full-screen viewer image(s) at the current zoom level."""
+        if not self.current_edited_image:
             return
 
-        width, height = self.current_edited_image.size
-        new_width = max(1, int(width * self.zoom_level))
-        new_height = max(1, int(height * self.zoom_level))
-        display_image = self.current_edited_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        self.fullscreen_photo = ImageTk.PhotoImage(display_image)
+        if self.fullscreen_viewers:
+            for viewer_state in self.fullscreen_viewers:
+                self.update_fullscreen_viewer_image(viewer_state)
+            return
 
-        if self.fullscreen_image_id:
-            self.fullscreen_canvas.delete(self.fullscreen_image_id)
+        if self.fullscreen_canvas:
+            self.fullscreen_viewers = [{
+                'canvas': self.fullscreen_canvas,
+                'image': self.current_edited_image,
+                'zoom_level': self.zoom_level,
+                'photo': None,
+                'image_id': None,
+            }]
+            self.update_fullscreen_viewer_image(self.fullscreen_viewers[0])
 
-        self.fullscreen_image_id = self.fullscreen_canvas.create_image(0, 0, anchor=tk.NW, image=self.fullscreen_photo)
-        self.fullscreen_canvas.config(scrollregion=self.fullscreen_canvas.bbox(tk.ALL))
+    def update_fullscreen_viewer_image(self, viewer_state):
+        image = viewer_state['image']
+        canvas = viewer_state['canvas']
+        zoom_level = viewer_state.get('zoom_level', self.zoom_level)
+        width, height = image.size
+        new_width = max(1, int(width * zoom_level))
+        new_height = max(1, int(height * zoom_level))
+        display_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        viewer_state['photo'] = ImageTk.PhotoImage(display_image)
+
+        if viewer_state.get('image_id'):
+            canvas.delete(viewer_state['image_id'])
+
+        viewer_state['image_id'] = canvas.create_image(0, 0, anchor=tk.NW, image=viewer_state['photo'])
+        canvas.config(scrollregion=canvas.bbox(tk.ALL))
 
     def open_fullscreen_preview(self, event=None):
-        """Open the edited image in a full-screen scrollable, zoomable window."""
-        if not self.current_edited_image:
+        """Open a full-screen split viewer for original and edited images."""
+        if not self.current_edited_image or not self.original_edit_image:
             return
 
         viewer = tk.Toplevel(self.root)
@@ -879,44 +909,22 @@ class BirdClassifierGUI:
         toolbar = ttk.Frame(viewer)
         toolbar.pack(side=tk.TOP, fill=tk.X)
         ttk.Button(toolbar, text="Close", command=viewer.destroy).pack(side=tk.LEFT, padx=5, pady=5)
-        ttk.Button(toolbar, text="-", width=3, command=self.zoom_out).pack(side=tk.LEFT, padx=2, pady=5)
-        ttk.Button(toolbar, text="+", width=3, command=self.zoom_in).pack(side=tk.LEFT, padx=2, pady=5)
-        ttk.Button(toolbar, text="Reset", command=self.zoom_reset).pack(side=tk.LEFT, padx=5, pady=5)
-        ttk.Label(toolbar, text="Two-finger scroll pans. Pinch/Control-scroll zooms. Esc closes.").pack(side=tk.LEFT, padx=10)
+        ttk.Label(toolbar, text="Original and edited images. Each side has independent zoom and scroll. Esc closes.").pack(side=tk.LEFT, padx=10)
 
-        canvas_frame = ttk.Frame(viewer)
-        canvas_frame.pack(fill=tk.BOTH, expand=True)
+        split_frame = ttk.Frame(viewer)
+        split_frame.pack(fill=tk.BOTH, expand=True)
+        split_frame.columnconfigure(0, weight=1, uniform="preview")
+        split_frame.columnconfigure(1, weight=1, uniform="preview")
+        split_frame.rowconfigure(0, weight=1)
 
-        h_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
-        v_scrollbar = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
-        self.fullscreen_canvas = tk.Canvas(
-            canvas_frame,
-            bg="#111111",
-            xscrollcommand=h_scrollbar.set,
-            yscrollcommand=v_scrollbar.set,
-        )
-        h_scrollbar.config(command=self.fullscreen_canvas.xview)
-        v_scrollbar.config(command=self.fullscreen_canvas.yview)
+        self.fullscreen_viewers = []
+        original_image = self.original_edit_image.copy()
+        edited_image = self.current_edited_image.copy()
+        self.create_split_viewer_panel(split_frame, "Original", original_image, 0)
+        self.create_split_viewer_panel(split_frame, "Edited", edited_image, 1)
 
-        self.fullscreen_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-        h_scrollbar.grid(row=1, column=0, sticky=(tk.W, tk.E))
-        v_scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
-        canvas_frame.columnconfigure(0, weight=1)
-        canvas_frame.rowconfigure(0, weight=1)
-
-        self.fullscreen_canvas.bind("<MouseWheel>", self.on_fullscreen_mousewheel)
-        self.fullscreen_canvas.bind("<Shift-MouseWheel>", self.on_fullscreen_shift_mousewheel)
-        self.fullscreen_canvas.bind("<Control-MouseWheel>", self.on_fullscreen_zoom_wheel)
-        self.fullscreen_canvas.bind("<Command-MouseWheel>", self.on_fullscreen_zoom_wheel)
-        self.fullscreen_canvas.bind("<Button-4>", self.on_fullscreen_scroll_up)
-        self.fullscreen_canvas.bind("<Button-5>", self.on_fullscreen_scroll_down)
-        try:
-            self.fullscreen_canvas.bind("<Magnify>", self.on_fullscreen_magnify)
-        except tk.TclError:
-            pass
-
+        self.fullscreen_canvas = self.fullscreen_viewers[0]['canvas']
         self.zoom_level = 1.0
-        self.fullscreen_image_id = None
         self.update_fullscreen_image_display()
         self.fullscreen_canvas.focus_set()
 
@@ -924,40 +932,155 @@ class BirdClassifierGUI:
             self.fullscreen_canvas = None
             self.fullscreen_photo = None
             self.fullscreen_image_id = None
+            self.fullscreen_viewers = []
 
         viewer.bind("<Destroy>", cleanup)
 
+    def create_split_viewer_panel(self, parent, title, image, column):
+        panel = ttk.LabelFrame(parent, text=title, padding="5")
+        panel.grid(row=0, column=column, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
+        panel.columnconfigure(0, weight=1)
+        panel.rowconfigure(1, weight=1)
+
+        controls = ttk.Frame(panel)
+        controls.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
+        ttk.Label(controls, text=title).pack(side=tk.LEFT, padx=5)
+        ttk.Button(controls, text="-", width=3, command=lambda: self.zoom_viewer(canvas, 1 / 1.25)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls, text="+", width=3, command=lambda: self.zoom_viewer(canvas, 1.25)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls, text="Reset", command=lambda: self.reset_viewer_zoom(canvas)).pack(side=tk.LEFT, padx=5)
+
+        h_scrollbar = ttk.Scrollbar(panel, orient=tk.HORIZONTAL)
+        v_scrollbar = ttk.Scrollbar(panel, orient=tk.VERTICAL)
+        canvas = tk.Canvas(
+            panel,
+            bg="#111111",
+            xscrollcommand=h_scrollbar.set,
+            yscrollcommand=v_scrollbar.set,
+        )
+        h_scrollbar.config(command=canvas.xview)
+        v_scrollbar.config(command=canvas.yview)
+
+        canvas.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        h_scrollbar.grid(row=2, column=0, sticky=(tk.W, tk.E))
+        v_scrollbar.grid(row=1, column=1, sticky=(tk.N, tk.S))
+
+        canvas.bind("<MouseWheel>", self.on_fullscreen_mousewheel)
+        canvas.bind("<Shift-MouseWheel>", self.on_fullscreen_shift_mousewheel)
+        canvas.bind("<Option-MouseWheel>", self.on_fullscreen_shift_mousewheel)
+        canvas.bind("<Command-MouseWheel>", self.on_fullscreen_shift_mousewheel)
+        canvas.bind("<Control-MouseWheel>", self.on_fullscreen_zoom_wheel)
+        canvas.bind("<Button-4>", self.on_fullscreen_scroll_up)
+        canvas.bind("<Button-5>", self.on_fullscreen_scroll_down)
+        self.bind_if_supported(canvas, "<Button-6>", self.on_fullscreen_scroll_left)
+        self.bind_if_supported(canvas, "<Button-7>", self.on_fullscreen_scroll_right)
+        try:
+            canvas.bind("<Magnify>", self.on_fullscreen_magnify)
+        except tk.TclError:
+            pass
+
+        self.fullscreen_viewers.append({
+            'canvas': canvas,
+            'image': image,
+            'zoom_level': 1.0,
+            'photo': None,
+            'image_id': None,
+        })
+
+    def bind_if_supported(self, widget, sequence, callback):
+        try:
+            widget.bind(sequence, callback)
+        except tk.TclError:
+            pass
+
+    def get_viewer_state_for_canvas(self, canvas):
+        for viewer_state in self.fullscreen_viewers:
+            if viewer_state.get('canvas') is canvas:
+                return viewer_state
+        return None
+
+    def zoom_viewer(self, canvas, factor):
+        viewer_state = self.get_viewer_state_for_canvas(canvas)
+        if not viewer_state:
+            return
+
+        viewer_state['zoom_level'] = max(0.05, viewer_state.get('zoom_level', 1.0) * factor)
+        self.update_fullscreen_viewer_image(viewer_state)
+
+    def reset_viewer_zoom(self, canvas):
+        viewer_state = self.get_viewer_state_for_canvas(canvas)
+        if not viewer_state:
+            return
+
+        viewer_state['zoom_level'] = 1.0
+        self.update_fullscreen_viewer_image(viewer_state)
+
     def on_fullscreen_mousewheel(self, event):
-        if self.fullscreen_canvas:
-            self.fullscreen_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        if event.widget:
+            horizontal = self.is_horizontal_scroll_event(event)
+            self.smooth_scroll_canvas(event.widget, -event.delta, horizontal=horizontal)
         return "break"
 
     def on_fullscreen_shift_mousewheel(self, event):
-        if self.fullscreen_canvas:
-            self.fullscreen_canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+        if event.widget:
+            self.smooth_scroll_canvas(event.widget, -event.delta, horizontal=True)
         return "break"
 
     def on_fullscreen_scroll_up(self, event):
-        if self.fullscreen_canvas:
-            self.fullscreen_canvas.yview_scroll(-3, "units")
+        if event.widget:
+            self.smooth_scroll_canvas(event.widget, -120, horizontal=False)
         return "break"
 
     def on_fullscreen_scroll_down(self, event):
-        if self.fullscreen_canvas:
-            self.fullscreen_canvas.yview_scroll(3, "units")
+        if event.widget:
+            self.smooth_scroll_canvas(event.widget, 120, horizontal=False)
         return "break"
+
+    def on_fullscreen_scroll_left(self, event):
+        if event.widget:
+            self.smooth_scroll_canvas(event.widget, -120, horizontal=True)
+        return "break"
+
+    def on_fullscreen_scroll_right(self, event):
+        if event.widget:
+            self.smooth_scroll_canvas(event.widget, 120, horizontal=True)
+        return "break"
+
+    def smooth_scroll_canvas(self, canvas, delta, horizontal=False):
+        bbox = canvas.bbox(tk.ALL)
+        if not bbox:
+            return
+
+        visible_size = canvas.winfo_width() if horizontal else canvas.winfo_height()
+        content_size = (bbox[2] - bbox[0]) if horizontal else (bbox[3] - bbox[1])
+        if content_size <= visible_size:
+            return
+
+        view = canvas.xview() if horizontal else canvas.yview()
+        scrollable = max(1, content_size - visible_size)
+        current_offset = view[0] * content_size
+        next_offset = min(max(0, current_offset + delta), scrollable)
+        fraction = next_offset / content_size
+
+        if horizontal:
+            canvas.xview_moveto(fraction)
+        else:
+            canvas.yview_moveto(fraction)
 
     def on_fullscreen_zoom_wheel(self, event):
         if event.delta > 0:
-            self.zoom_in()
+            self.zoom_viewer(event.widget, 1.25)
         else:
-            self.zoom_out()
+            self.zoom_viewer(event.widget, 1 / 1.25)
         return "break"
 
     def on_fullscreen_magnify(self, event):
-        self.zoom_level *= max(0.2, 1.0 + event.delta)
-        self.update_fullscreen_image_display()
+        self.zoom_viewer(event.widget, max(0.2, 1.0 + event.delta))
         return "break"
+
+    def is_horizontal_scroll_event(self, event):
+        # Tk modifier masks vary by platform/theme; these cover Shift, Mod1/Option, and Command/Mod2 paths.
+        horizontal_masks = (0x0001, 0x0008, 0x0010, 0x0080, 0x20000)
+        return any(event.state & mask for mask in horizontal_masks)
 
     def bind_app_scroll_events(self):
         """Make two-finger/mouse-wheel scrolling work across scrollable app areas."""
@@ -1002,8 +1125,9 @@ class BirdClassifierGUI:
         if isinstance(event.widget, tk.Text):
             return
 
-        widget = self.find_scrollable_widget(event.widget)
-        self.scroll_widget(widget, int(-1 * (event.delta / 120)))
+        horizontal = self.is_horizontal_scroll_event(event)
+        widget = self.find_scrollable_widget(event.widget, horizontal=horizontal)
+        self.scroll_widget(widget, int(-1 * (event.delta / 120)), horizontal=horizontal)
 
     def on_app_shift_mousewheel(self, event):
         if isinstance(event.widget, tk.Text):
@@ -1059,6 +1183,7 @@ class BirdClassifierGUI:
 
         self.edit_image_path.set(str(path))
         self.reset_editing_context()
+        self.show_selected_image_preview(path)
         return True
 
     def browse_edit_image(self):
@@ -1092,7 +1217,7 @@ class BirdClassifierGUI:
             return
 
         # Disable button and reset progress
-        self.edit_button.config(state=tk.DISABLED)
+        self.edit_button.state(['disabled'])
         self.edit_progress_var.set(0)
         self.edit_status_label.config(text="Starting AI editing...")
         additional_instructions = self.additional_edit_instructions_text.get("1.0", tk.END).strip()
