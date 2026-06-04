@@ -562,6 +562,7 @@ class BirdClassifierGUI:
         self.fix_blur_var = tk.BooleanVar(value=False)
         self.focus_on_bird_var = tk.BooleanVar(value=True)
         self.add_bird_name_var = tk.BooleanVar(value=True)
+        self.bird_name_text_color_var = tk.StringVar(value="white")
         ttk.Checkbutton(
             options_frame,
             text="Fix lighting and color",
@@ -582,6 +583,19 @@ class BirdClassifierGUI:
             text="Add name",
             variable=self.add_bird_name_var,
         ).pack(side=tk.LEFT, padx=10)
+        ttk.Label(options_frame, text="Text color:").pack(side=tk.LEFT, padx=(10, 2))
+        ttk.Radiobutton(
+            options_frame,
+            text="White",
+            variable=self.bird_name_text_color_var,
+            value="white",
+        ).pack(side=tk.LEFT, padx=2)
+        ttk.Radiobutton(
+            options_frame,
+            text="Black",
+            variable=self.bird_name_text_color_var,
+            value="black",
+        ).pack(side=tk.LEFT, padx=2)
 
         # Edit button
         edit_button_frame = ttk.Frame(content)
@@ -1059,6 +1073,7 @@ class BirdClassifierGUI:
             'fix_blur': self.fix_blur_var.get(),
             'focus_on_bird': self.focus_on_bird_var.get(),
             'add_bird_name': self.add_bird_name_var.get(),
+            'bird_name_text_color': self.bird_name_text_color_var.get(),
         }
 
     def _perform_ai_edit(self, image_path, api_key, modification=None, aspect_ratio='square', bird_name='', user_watermark='', edit_options=None):
@@ -1183,7 +1198,11 @@ Create a {aspect_label} edited version of this exact image following these requi
             # Ensure the image matches the requested aspect ratio
             edited_image = self._ensure_aspect_ratio(edited_image, aspect_ratio)
             if edit_options.get('add_bird_name'):
-                edited_image = self._add_bird_name_label(edited_image, bird_name)
+                edited_image = self._add_bird_name_label(
+                    edited_image,
+                    bird_name,
+                    edit_options.get('bird_name_text_color', 'white'),
+                )
 
             # Store the edited image
             self.current_edited_image = edited_image
@@ -1208,11 +1227,12 @@ Create a {aspect_label} edited version of this exact image following these requi
                     pass
             self.queue.put({'type': 'edit_button_ready'})
 
-    def _add_bird_name_label(self, image, bird_name):
-        """Draw the optional bird name at the top with capped Noto Sans text height."""
+    def _add_bird_name_label(self, image, bird_name, text_color):
+        """Draw the optional bird name top-right with capped Noto Sans text height."""
         if not bird_name:
             return image
 
+        text_color = 'black' if text_color == 'black' else 'white'
         output = image.convert("RGBA")
         draw = ImageDraw.Draw(output)
         width, height = output.size
@@ -1231,28 +1251,14 @@ Create a {aspect_label} edited version of this exact image following these requi
 
         bbox = draw.textbbox((0, 0), bird_name, font=font)
         text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
-        x = (width - text_width) // 2
+        x = max(4, width - text_width - horizontal_padding)
         y = max(4, int(height * 0.025))
-
-        sample_box = (
-            max(0, x - 8),
-            max(0, y - 8),
-            min(width, x + text_width + 8),
-            min(height, y + text_height + 8),
-        )
-        crop = output.crop(sample_box).convert("L")
-        avg_luminance = sum(crop.getdata()) / max(1, crop.width * crop.height)
-        fill = "black" if avg_luminance > 150 else "white"
-        stroke_fill = "white" if fill == "black" else "black"
 
         draw.text(
             (x, y - bbox[1]),
             bird_name,
             font=font,
-            fill=fill,
-            stroke_width=max(1, font.size // 18),
-            stroke_fill=stroke_fill,
+            fill=text_color,
         )
         return output.convert(image.mode if image.mode in ("RGB", "RGBA") else "RGB")
 
